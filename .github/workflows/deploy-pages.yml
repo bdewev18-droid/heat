@@ -1,0 +1,56 @@
+name: Deploy Web to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      run_analyze:
+        description: Run the full Dart analyzer before the web build
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: heat-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and publish Flutter web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.44.5"
+          cache: true
+
+      - name: Flutter pub get
+        run: timeout 90s flutter pub get
+
+      - name: Analyze (optional)
+        if: ${{ inputs.run_analyze == true }}
+        run: timeout 120s flutter analyze --no-pub
+
+      - name: Build web
+        run: flutter build web --release --base-href '/heat/'
+
+      - name: Publish to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: build/web
+          force_orphan: true
+          enable_jekyll: false

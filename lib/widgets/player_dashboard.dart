@@ -1,365 +1,346 @@
 import 'package:flutter/material.dart';
-import '../models/heat_card.dart';
+import '../models/game_state.dart';
+import '../theme/heat_theme.dart';
+import 'heat_card_widget.dart';
 
-/// Tableau de bord du joueur : boîte de vitesses, moteur, pioche, main et défausse.
+/// Plateau joueur inspiré du cockpit Heat (livret PDF p. 2, 3, 5) :
+/// Pioche damier, Moteur (Heat), Défausse (carte du dessus), Boîte de vitesses,
+/// Zone de jeu et Main du joueur.
 class PlayerDashboard extends StatelessWidget {
   const PlayerDashboard({
     super.key,
-    required this.gear,
-    required this.onGearChanged,
-    required this.drawPile,
-    required this.hand,
-    required this.playedCards,
-    required this.discardPile,
-    required this.engineHeatCount,
-    required this.onShuffleDeck,
-    required this.onDrawToSeven,
-    required this.onPlayCard,
-    required this.onDiscardPlayed,
-    required this.onReshuffleDiscard,
+    required this.controller,
   });
 
-  final int gear;
-  final ValueChanged<int> onGearChanged;
-  final List<HeatCard> drawPile;
-  final List<HeatCard> hand;
-  final List<HeatCard> playedCards;
-  final List<HeatCard> discardPile;
-  final int engineHeatCount;
-  final VoidCallback onShuffleDeck;
-  final VoidCallback onDrawToSeven;
-  final ValueChanged<HeatCard> onPlayCard;
-  final VoidCallback onDiscardPlayed;
-  final VoidCallback onReshuffleDiscard;
+  final HeatGameController controller;
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildCockpitMat(),
+        if (controller.playArea.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _buildPlayArea(),
+        ],
+        const SizedBox(height: 10),
+        _buildHandSection(),
+        const SizedBox(height: 10),
+        _buildEventLog(),
+      ],
+    );
+  }
+
+  Widget _buildCockpitMat() {
+    final topDiscard =
+        controller.discardPile.isEmpty ? null : controller.discardPile.last;
+    final topEngine =
+        controller.engineHeat.isEmpty ? null : controller.engineHeat.last;
+
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF1C1F26),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
-      ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildGearboxAndEngine(),
-          const SizedBox(height: 12),
-          _buildPilesRow(),
-          const SizedBox(height: 12),
-          if (playedCards.isNotEmpty) ...[
-            _buildPlayedSection(),
-            const SizedBox(height: 12),
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            HeatColors.navyHeader,
+            Color(0xFF152A3E),
+            Color(0xFF2B221D),
           ],
-          _buildHandSection(),
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: HeatColors.heatGold, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 3 emplacements : Pioche, Moteur, Défausse
+          Expanded(
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 10,
+              alignment: WrapAlignment.spaceEvenly,
+              children: [
+                // Pioche
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'PIOCHE',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1,
+                        color: HeatColors.heatGold,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    HeatCardBackWidget(
+                      width: 62,
+                      height: 88,
+                      count: controller.drawPile.length,
+                      onTap: controller.shuffleDrawPile,
+                    ),
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: controller.shuffleDrawPile,
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.shuffle, size: 12, color: Colors.white70),
+                          SizedBox(width: 3),
+                          Text(
+                            'Mélanger',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                // Moteur (Heat)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'MOTEUR (${controller.engineHeat.length})',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1,
+                        color: Color(0xFFFFA84D),
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    if (topEngine != null)
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          HeatCardWidget(
+                            card: topEngine,
+                            width: 62,
+                            height: 88,
+                            enabled: true,
+                          ),
+                          Positioned(
+                            top: 28,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.72),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: HeatColors.heatGold,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Text(
+                                '${controller.engineHeat.length}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      _EmptySlotBox(
+                        width: 62,
+                        height: 88,
+                        icon: Icons.local_fire_department_outlined,
+                        label: '0 Heat',
+                      ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Stress rés. ${controller.stressReserve.length}',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        color: Colors.white60,
+                      ),
+                    ),
+                  ],
+                ),
+
+                // Défausse (seule la carte du dessus est visible - règle p. 6)
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'DÉFAUSSE (${controller.discardPile.length})',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 1,
+                        color: Colors.white70,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    if (topDiscard != null)
+                      HeatCardWidget(
+                        card: topDiscard,
+                        width: 62,
+                        height: 88,
+                        enabled: true,
+                      )
+                    else
+                      const _EmptySlotBox(
+                        width: 62,
+                        height: 88,
+                        icon: Icons.delete_outline,
+                        label: 'Vide',
+                      ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Dessus visible',
+                      style: TextStyle(fontSize: 10, color: Colors.white54),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(width: 10),
+
+          // Boîte de vitesses verticale (4 en haut -> 1 en bas, comme le plateau p. 2 & 7)
+          _buildVerticalGearbox(),
         ],
       ),
     );
   }
 
-  Widget _buildGearboxAndEngine() {
-    return Row(
-      children: [
-        Expanded(
-          flex: 3,
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF252932),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'BOÎTE DE VITESSES',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.0,
-                    color: Colors.white60,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [1, 2, 3, 4].map((g) {
-                    final selected = gear == g;
-                    return Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.only(right: g < 4 ? 6 : 0),
-                        child: InkWell(
-                          onTap: () => onGearChanged(g),
-                          borderRadius: BorderRadius.circular(8),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 150),
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: selected
-                                  ? const Color(0xFFE53935)
-                                  : const Color(0xFF16181E),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: selected
-                                    ? Colors.white
-                                    : Colors.white24,
-                                width: selected ? 1.5 : 1,
-                              ),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '$g',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: selected ? Colors.white : Colors.white70,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
+  Widget _buildVerticalGearbox() {
+    final isShiftStep = controller.step == RoundStep.shiftGears;
+    final activeGear =
+        isShiftStep ? controller.selectedTargetGear : controller.gear;
+
+    return Container(
+      width: 78,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF101923),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'VITESSES',
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+              color: HeatColors.heatGold,
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          flex: 2,
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF252932),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.deepOrange.withValues(alpha: 0.4)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'MOTEUR (HEAT)',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.0,
-                    color: Colors.orangeAccent,
+          const SizedBox(height: 6),
+          ...[4, 3, 2, 1].map((g) {
+            final isCurrent = activeGear == g;
+            final selectable = isShiftStep && controller.canSelectGear(g);
+            final cooldown = g == 1 ? 3 : (g == 2 ? 1 : 0);
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: InkWell(
+                onTap:
+                    selectable ? () => controller.selectTargetGear(g) : null,
+                borderRadius: BorderRadius.circular(8),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 140),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 4,
                   ),
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 40,
+                  decoration: BoxDecoration(
+                    color: isCurrent
+                        ? HeatColors.heatRed
+                        : (selectable
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.black26),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isCurrent
+                          ? HeatColors.heatGold
+                          : (selectable ? Colors.white38 : Colors.white12),
+                      width: isCurrent ? 1.8 : 1,
+                    ),
+                  ),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Icon(
-                        Icons.local_fire_department,
-                        color: Colors.deepOrangeAccent,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 6),
                       Text(
-                        '$engineHeatCount',
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
+                        '$g',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                          color: isCurrent
+                              ? Colors.white
+                              : (selectable ? Colors.white70 : Colors.white30),
                         ),
                       ),
+                      if (cooldown > 0)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.ac_unit,
+                              size: 11,
+                              color: Color(0xFF64B5F6),
+                            ),
+                            Text(
+                              '$cooldown',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF90CAF9),
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        const Icon(
+                          Icons.speed,
+                          size: 12,
+                          color: Colors.white24,
+                        ),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-        ),
-      ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 
-  Widget _buildPilesRow() {
-    final topDiscard = discardPile.isEmpty ? null : discardPile.last;
-
-    return Row(
-      children: [
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF252932),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'PIOCHE',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.0,
-                        color: Colors.white60,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white12,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${drawPile.length} cartes',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    ElevatedButton.icon(
-                      onPressed: onShuffleDeck,
-                      icon: const Icon(Icons.shuffle, size: 16),
-                      label: const Text('Mélanger'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        textStyle: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                    ElevatedButton.icon(
-                      onPressed: onDrawToSeven,
-                      icon: const Icon(Icons.style, size: 16),
-                      label: const Text('Piocher (7)'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF2E7D32),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 8,
-                        ),
-                        textStyle: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF252932),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'DÉFAUSSE',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.0,
-                        color: Colors.white60,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white12,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '${discardPile.length} cartes',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    if (topDiscard != null)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: topDiscard.accentColor.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: topDiscard.accentColor),
-                        ),
-                        child: Text(
-                          topDiscard.title,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                        ),
-                      )
-                    else
-                      const Text(
-                        'Vide',
-                        style: TextStyle(color: Colors.white38, fontSize: 12),
-                      ),
-                    const Spacer(),
-                    if (discardPile.isNotEmpty)
-                      TextButton.icon(
-                        onPressed: onReshuffleDiscard,
-                        icon: const Icon(Icons.refresh, size: 15),
-                        label: const Text('Remélanger'),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                          textStyle: const TextStyle(fontSize: 12),
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildPlayedSection() {
+  Widget _buildPlayArea() {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFF252932),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.amber.withValues(alpha: 0.35)),
+        color: HeatColors.paperCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: HeatColors.heatOrange, width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -367,33 +348,45 @@ class PlayerDashboard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'CARTES JOUÉES (${playedCards.length})',
-                style: const TextStyle(
+              const Text(
+                'ZONE DE JEU (CARTES RÉVÉLÉES)',
+                style: TextStyle(
                   fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.0,
-                  color: Colors.amberAccent,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.9,
+                  color: HeatColors.navyHeader,
                 ),
               ),
-              TextButton.icon(
-                onPressed: onDiscardPlayed,
-                icon: const Icon(Icons.delete_sweep, size: 16),
-                label: const Text('Défausser'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.amberAccent,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  textStyle: const TextStyle(fontSize: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: HeatColors.heatRed,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'VITESSE : ${controller.turnSpeed}',
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: playedCards
-                .map((card) => _HeatCardTile(card: card, compact: true))
+            children: controller.playArea
+                .map(
+                  (card) => HeatCardWidget(
+                    card: card,
+                    width: 60,
+                    height: 86,
+                    enabled: true,
+                  ),
+                )
                 .toList(),
           ),
         ],
@@ -402,111 +395,174 @@ class PlayerDashboard extends StatelessWidget {
   }
 
   Widget _buildHandSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'MAIN (${hand.length}/7) — Clique sur une carte pour la jouer',
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.0,
-            color: Colors.white60,
-          ),
-        ),
-        const SizedBox(height: 8),
-        if (hand.isEmpty)
-          Container(
-            height: 84,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: const Color(0xFF16181E),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.white10),
-            ),
-            child: const Text(
-              'Main vide — Clique sur "Piocher (7)"',
-              style: TextStyle(color: Colors.white38, fontSize: 13),
-            ),
-          )
-        else
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: hand
-                .map(
-                  (card) => _HeatCardTile(
-                    card: card,
-                    onTap: () => onPlayCard(card),
+    final step = controller.step;
+    final hint = switch (step) {
+      RoundStep.playCards =>
+        'Sélectionne ${controller.gear} carte(s) à jouer',
+      RoundStep.react when controller.remainingCooldowns > 0 =>
+        'Clique sur une carte Heat pour la refroidir (${controller.remainingCooldowns} restant)',
+      RoundStep.discard =>
+        'Clique sur les cartes à défausser (hors Stress/Heat)',
+      _ => 'Main du pilote',
+    };
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: HeatColors.paperCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: HeatColors.paperBorder, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'MAIN (${controller.hand.length}/7)',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.9,
+                  color: HeatColors.navyHeader,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '• $hint',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    color: HeatColors.inkMuted,
+                    fontWeight: FontWeight.w600,
                   ),
-                )
-                .toList(),
+                ),
+              ),
+            ],
           ),
-      ],
+          const SizedBox(height: 10),
+          if (controller.hand.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 16),
+              child: Center(
+                child: Text(
+                  'Aucune carte en main.',
+                  style: TextStyle(color: HeatColors.inkMuted),
+                ),
+              ),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 10,
+              children: controller.hand.map((card) {
+                final selected = controller.selectedCardIds.contains(card.id);
+                final interactive = controller.canToggleCardInHand(card);
+                return HeatCardWidget(
+                  card: card,
+                  width: 72,
+                  height: 102,
+                  selected: selected,
+                  enabled: interactive ||
+                      (step != RoundStep.playCards &&
+                          step != RoundStep.discard &&
+                          step != RoundStep.react),
+                  onTap:
+                      interactive ? () => controller.onHandCardTapped(card) : null,
+                );
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEventLog() {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: HeatColors.paperCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: HeatColors.paperBorder, width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.history, size: 15, color: HeatColors.navyHeader),
+              SizedBox(width: 6),
+              Text(
+                'JOURNAL DE COURSE',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.9,
+                  color: HeatColors.navyHeader,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 115,
+            child: ListView.separated(
+              itemCount: controller.eventLog.length,
+              separatorBuilder: (_, _) =>
+                  const Divider(height: 8, color: HeatColors.paperBorder),
+              itemBuilder: (context, index) {
+                return Text(
+                  controller.eventLog[index],
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: index == 0 ? HeatColors.inkDark : HeatColors.inkMuted,
+                    fontWeight:
+                        index == 0 ? FontWeight.w700 : FontWeight.normal,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _HeatCardTile extends StatelessWidget {
-  const _HeatCardTile({
-    required this.card,
-    this.onTap,
-    this.compact = false,
+class _EmptySlotBox extends StatelessWidget {
+  const _EmptySlotBox({
+    required this.width,
+    required this.height,
+    required this.icon,
+    required this.label,
   });
 
-  final HeatCard card;
-  final VoidCallback? onTap;
-  final bool compact;
+  final double width;
+  final double height;
+  final IconData icon;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    final width = compact ? 58.0 : 68.0;
-    final height = compact ? 74.0 : 88.0;
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: width,
-        height: height,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              card.accentColor.withValues(alpha: 0.35),
-              const Color(0xFF15171C),
-            ],
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.black26,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: Colors.white38, size: 22),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white38, fontSize: 10),
           ),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: card.accentColor, width: 1.5),
-        ),
-        padding: const EdgeInsets.all(6),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              card.title,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: card.type == HeatCardType.speed ? 24 : 11,
-                fontWeight: FontWeight.w900,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              card.subtitle,
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 9,
-                color: Colors.white70,
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
   }

@@ -1,0 +1,6 @@
+{
+  "version": "1.2.0",
+  "buildNumber": 3,
+  "apkUrl": "https://github.com/bdewev18-droid/heat/releases/latest/download/app-release.apk",
+  "releaseNotes": "v1.2.0 : Icône Heat vintage, mise à jour intégrée, zoom/pan fluide et voiture proportionnée, repères entre voiture et prochain virage, 2 bots adverses en mode shadow sans triche et jet de dés de départ."
+}

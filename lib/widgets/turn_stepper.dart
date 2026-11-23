@@ -3,7 +3,7 @@ import '../models/game_state.dart';
 import '../theme/heat_theme.dart';
 
 /// Barre des 9 étapes officielles du tour (style compteurs p. 4 du PDF)
-/// + panneau d'action interactif pour l'étape active.
+/// + jet de dés initial + panneau d'action interactif.
 class TurnStepperPanel extends StatelessWidget {
   const TurnStepperPanel({
     super.key,
@@ -33,8 +33,10 @@ class TurnStepperPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildStepBadgesRow(step),
-          const SizedBox(height: 10),
+          if (step != RoundStep.diceRoll) ...[
+            _buildStepBadgesRow(step),
+            const SizedBox(height: 10),
+          ],
           _buildActiveStepContent(context, step),
         ],
       ),
@@ -42,8 +44,9 @@ class TurnStepperPanel extends StatelessWidget {
   }
 
   Widget _buildStepBadgesRow(RoundStep current) {
-    final roundSteps =
-        RoundStep.values.where((s) => s != RoundStep.finished).toList();
+    final roundSteps = RoundStep.values
+        .where((s) => s != RoundStep.diceRoll && s != RoundStep.finished)
+        .toList();
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -107,6 +110,8 @@ class TurnStepperPanel extends StatelessWidget {
 
   Widget _buildActiveStepContent(BuildContext context, RoundStep step) {
     switch (step) {
+      case RoundStep.diceRoll:
+        return _buildDiceRollStep();
       case RoundStep.shiftGears:
         return _buildShiftGearsStep();
       case RoundStep.playCards:
@@ -128,6 +133,136 @@ class TurnStepperPanel extends StatelessWidget {
       case RoundStep.finished:
         return _buildFinishedStep();
     }
+  }
+
+  Widget _buildDiceRollStep() {
+    final rolled = controller.diceRolled;
+    final standings = controller.standings;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const HeatSectionBanner(
+          title: 'Grille de départ — Jet de dés',
+          compact: true,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          rolled
+              ? 'Ordre de départ tiré au sort ! Les 2 pilotes adverses jouent en mode Shadow avec leur propre paquet (aucune triche).'
+              : 'Lance les dés pour déterminer qui part en Pole Position face aux 2 pilotes adverses (Bleu et Vert) !',
+          style: const TextStyle(fontSize: 12.5, color: HeatColors.inkDark),
+        ),
+        const SizedBox(height: 10),
+        if (rolled) ...[
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: standings.asMap().entries.map((entry) {
+              final pos = entry.key + 1;
+              final racer = entry.value;
+              return Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: racer.isHuman
+                      ? HeatColors.heatGold.withValues(alpha: 0.22)
+                      : HeatColors.paperCream,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: racer.color,
+                    width: racer.isHuman ? 2 : 1.3,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(
+                      radius: 11,
+                      backgroundColor: racer.color,
+                      child: Text(
+                        'P$pos',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      racer.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12.5,
+                        color: HeatColors.inkDark,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: HeatColors.navyHeader,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.casino,
+                            size: 13,
+                            color: HeatColors.heatGold,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${racer.diceRoll}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ElevatedButton.icon(
+                onPressed: controller.startRaceAfterDiceRoll,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: HeatColors.trackGreen,
+                ),
+                icon: const Icon(Icons.flag, size: 18),
+                label: const Text('Démarrer la course !'),
+              ),
+              OutlinedButton.icon(
+                onPressed: controller.rollStartingDice,
+                icon: const Icon(Icons.casino, size: 18),
+                label: const Text('Relancer'),
+              ),
+            ],
+          ),
+        ] else
+          ElevatedButton.icon(
+            onPressed: controller.rollStartingDice,
+            icon: const Icon(Icons.casino, size: 20),
+            label: const Text('Lancer les dés !'),
+          ),
+      ],
+    );
   }
 
   Widget _buildShiftGearsStep() {
@@ -211,9 +346,8 @@ class TurnStepperPanel extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           cluttered
-              ? 'Main encombrée (p. 7) : tu n\'as pas assez de cartes jouables ! '
-                  'Sélectionne tes cartes jouables et complète avec des cartes Heat (vitesse retombe en 1ère sans avancer).'
-              : 'Clique sur $needed carte(s) dans ta main ci-dessous (les cartes Heat ne peuvent pas être jouées).',
+              ? 'Main encombrée (p. 7) : sélectionne tes cartes jouables et complète avec des cartes Heat (vitesse remise en 1ère sans avancer).'
+              : 'Clique sur $needed carte(s) ci-dessous. Les 2 pilotes adverses jouent leurs cartes simultanément !',
           style: TextStyle(
             fontSize: 12.5,
             color: cluttered ? HeatColors.heatRed : HeatColors.inkMuted,
@@ -225,7 +359,7 @@ class TurnStepperPanel extends StatelessWidget {
           onPressed:
               controller.canConfirmPlayCards ? controller.confirmPlayCards : null,
           icon: const Icon(Icons.visibility, size: 18),
-          label: Text('Révéler & calculer la vitesse ($selected/$needed)'),
+          label: Text('Révéler & lancer la manche ($selected/$needed)'),
         ),
       ],
     );
@@ -247,14 +381,16 @@ class TurnStepperPanel extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           pending > 0
-              ? 'Il te reste $pending case(s) à avancer. Clique sur "+1 Case" ou directement sur la pastille "+1" sur le circuit !'
-              : 'Déplacement terminé (${controller.turnSpacesMoved} cases avancées). Passe à l\'étape suivante.',
+              ? 'Il te reste $pending case(s) à avancer. Clique sur "+1 Case" ou sur la pastille "+1" sur la piste.'
+              : 'Déplacement terminé (${controller.turnSpacesMoved} cases avancées).',
           style: const TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
         ),
         const SizedBox(height: 8),
         _buildMovementButtonsRow(
           onContinue: pending == 0 ? controller.proceedFromRevealAndMove : null,
-          continueLabel: 'Étape 4 : Adrénaline',
+          continueLabel: controller.adrenalineEligible
+              ? 'Étape 4 : Adrénaline (3e place !)'
+              : 'Étape 5 : Réagir',
         ),
       ],
     );
@@ -265,7 +401,7 @@ class TurnStepperPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '4. Adrénaline (dernier pilote du tour)',
+          '4. Adrénaline (tu es dernier sur ce tour !)',
           style: TextStyle(
             fontWeight: FontWeight.w900,
             fontSize: 14,
@@ -274,8 +410,8 @@ class TurnStepperPanel extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Si tu joues en mode entraînement solo, tu peux simuler l\'Adrénaline '
-          '(+1 Vitesse/case et +1 Refroidissement à l\'étape 5) ou passer.',
+          'En tant que dernière voiture de la manche, tu bénéficies de l\'Adrénaline : '
+          '+1 Vitesse/case optionnel et +1 Refroidissement à l\'étape 5.',
           style: TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
         ),
         const SizedBox(height: 8),
@@ -283,15 +419,17 @@ class TurnStepperPanel extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            OutlinedButton.icon(
-              onPressed: () => controller.chooseAdrenaline(activate: true),
-              icon: const Icon(Icons.bolt, size: 18),
-              label: const Text('Activer Adrénaline'),
-            ),
             ElevatedButton.icon(
+              onPressed: () => controller.chooseAdrenaline(activate: true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: HeatColors.cooldownBlue,
+              ),
+              icon: const Icon(Icons.bolt, size: 18),
+              label: const Text('Activer Adrénaline → Réagir'),
+            ),
+            OutlinedButton(
               onPressed: () => controller.chooseAdrenaline(activate: false),
-              icon: const Icon(Icons.arrow_forward, size: 18),
-              label: const Text('Passer → Réagir'),
+              child: const Text('Ignorer'),
             ),
           ],
         ),
@@ -317,8 +455,8 @@ class TurnStepperPanel extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          'Refroidissement disponible : $cooldowns (clique sur une carte Heat en main pour la renvoyer dans le moteur — $heatInHand Heat en main). '
-          'Boost : paye 1 Heat du moteur pour retourner une carte Basic (+vitesse & cases).',
+          'Refroidissement disponible : $cooldowns ($heatInHand Heat en main, clique dessus pour refroidir). '
+          'Boost : 1 Heat du moteur pour retourner une carte Basic (+vitesse & cases).',
           style: const TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
         ),
         const SizedBox(height: 8),
@@ -374,6 +512,8 @@ class TurnStepperPanel extends StatelessWidget {
 
   Widget _buildSlipstreamStep() {
     final pending = controller.pendingStepsToMove;
+    final hasTarget = controller.hasRealSlipstreamTarget;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -386,10 +526,16 @@ class TurnStepperPanel extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        const Text(
-          'Si tu arrives à côté ou juste derrière une autre voiture, tu peux avancer '
-          'de 2 cases gratuitement (n\'augmente PAS ta vitesse pour les virages).',
-          style: TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
+        Text(
+          hasTarget
+              ? 'Un pilote adverse est juste à côté ou 1 case devant toi ! '
+                  'Tu peux prendre l\'aspiration (+2 cases gratuites, ne compte PAS pour la vitesse en virage).'
+              : 'Aucune voiture adverse à côté ou 1 case devant toi ce tour.',
+          style: TextStyle(
+            fontSize: 12.5,
+            color: hasTarget ? HeatColors.trackGreen : HeatColors.inkMuted,
+            fontWeight: hasTarget ? FontWeight.w700 : FontWeight.normal,
+          ),
         ),
         const SizedBox(height: 8),
         if (pending > 0)
@@ -399,13 +545,17 @@ class TurnStepperPanel extends StatelessWidget {
             spacing: 8,
             runSpacing: 8,
             children: [
-              OutlinedButton.icon(
-                onPressed: controller.canUseSlipstream
-                    ? controller.activateSlipstream
-                    : null,
-                icon: const Icon(Icons.fast_forward, size: 18),
-                label: const Text('Utiliser Aspiration (+2 cases)'),
-              ),
+              if (hasTarget)
+                ElevatedButton.icon(
+                  onPressed: controller.canUseSlipstream
+                      ? controller.activateSlipstream
+                      : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: HeatColors.trackGreen,
+                  ),
+                  icon: const Icon(Icons.fast_forward, size: 18),
+                  label: const Text('Prendre l\'aspiration (+2 cases)'),
+                ),
               ElevatedButton.icon(
                 onPressed: controller.proceedFromSlipstream,
                 icon: const Icon(Icons.arrow_forward, size: 18),
@@ -564,7 +714,7 @@ class TurnStepperPanel extends StatelessWidget {
         const SizedBox(height: 4),
         const Text(
           'Clique sur les cartes de ta main que tu souhaites défausser '
-          '(impossible de défausser les cartes Stress et Heat).',
+          '(impossible de défausser Stress et Heat).',
           style: TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
         ),
         const SizedBox(height: 8),
@@ -595,7 +745,7 @@ class TurnStepperPanel extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Défausse les cartes jouées et repioche jusqu\'à 7 cartes pour démarrer le tour suivant.',
+          'Défausse la zone de jeu, repioche jusqu\'à 7 cartes, puis les pilotes derrière toi terminent la manche.',
           style: TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
         ),
         const SizedBox(height: 8),
@@ -608,7 +758,7 @@ class TurnStepperPanel extends StatelessWidget {
           label: Text(
             controller.hasCrossedFinishLine
                 ? 'Franchir l\'arrivée !'
-                : 'Compléter à 7 cartes & Tour suivant',
+                : 'Compléter à 7 cartes & Manche suivante',
           ),
         ),
       ],
@@ -616,28 +766,50 @@ class TurnStepperPanel extends StatelessWidget {
   }
 
   Widget _buildFinishedStep() {
+    final rank = controller.playerFinishRank ?? 1;
+    final standings = controller.standings;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'DRAPEAU À DAMIER — COURSE TERMINÉE !',
-          style: TextStyle(
+        Text(
+          'DRAPEAU À DAMIER — TU TERMINES ${rank}E !',
+          style: const TextStyle(
             fontWeight: FontWeight.w900,
             fontSize: 15,
             color: HeatColors.heatRed,
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          'Bravo ! Tu as bouclé les ${controller.totalLaps} tours du circuit '
-          'Deutschland en ${controller.roundNumber} tours.',
-          style: const TextStyle(fontSize: 13, color: HeatColors.inkDark),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: standings.asMap().entries.map((e) {
+            final r = e.value;
+            return Chip(
+              avatar: CircleAvatar(
+                backgroundColor: r.color,
+                child: Text(
+                  '${e.key + 1}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              label: Text(
+                r.name,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            );
+          }).toList(),
         ),
         const SizedBox(height: 8),
         ElevatedButton.icon(
           onPressed: () => controller.resetRace(),
           icon: const Icon(Icons.replay, size: 18),
-          label: const Text('Recommencer une course'),
+          label: const Text('Nouvelle course'),
         ),
       ],
     );

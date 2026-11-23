@@ -1,10 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../models/track_data.dart';
+import '../services/app_update_service.dart';
 import '../theme/heat_theme.dart';
 import 'game_screen.dart';
 
 /// Page d'accueil (HP) reprenant la charte graphique du livret PDF :
-/// Logo HEAT, bouton JOUER, puis sélection du circuit (Allemagne uniquement).
+/// Icône + Logo HEAT, gestion de mise à jour APK, bouton JOUER, puis sélection
+/// du circuit (Allemagne uniquement).
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -15,6 +18,26 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _showTrackSelection = false;
   int _selectedLaps = DeutschlandTrack.defaultLaps;
+
+  RemoteAppVersion? _pendingUpdate;
+  bool _isCheckingUpdate = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkLaunchUpdate();
+  }
+
+  Future<void> _checkLaunchUpdate() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (mounted) setState(() => _isCheckingUpdate = true);
+    final update = await AppUpdateService.checkUpdate();
+    if (!mounted) return;
+    setState(() {
+      _pendingUpdate = update;
+      _isCheckingUpdate = false;
+    });
+  }
 
   void _startDeutschlandRace() {
     Navigator.of(context).push(
@@ -30,14 +53,13 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Fond papier vintage + bandeaux racing
           CustomPaint(painter: _VintageRacingBgPainter()),
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 20,
-                  vertical: 24,
+                  vertical: 22,
                 ),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 680),
@@ -61,12 +83,33 @@ class _HomeScreenState extends State<HomeScreen> {
       key: const ValueKey('hero'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        const HeatLogoWidget(scale: 1.05),
-        const SizedBox(height: 22),
-
-        // Encart façon page 1 & 2 du livret avec bordure dorée
+        // Emblème / Icône du jeu
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 18),
+          width: 96,
+          height: 96,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: HeatColors.heatGold, width: 3),
+            boxShadow: [
+              BoxShadow(
+                color: HeatColors.navyHeader.withValues(alpha: 0.35),
+                blurRadius: 12,
+                offset: const Offset(0, 5),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Image.asset(
+            'assets/images/app_icon.png',
+            fit: BoxFit.cover,
+          ),
+        ),
+        const SizedBox(height: 12),
+        const HeatLogoWidget(scale: 0.98),
+        const SizedBox(height: 20),
+
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
           decoration: BoxDecoration(
             color: HeatColors.paperCard.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(14),
@@ -85,7 +128,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 'METS LE PIED AU PLANCHER !',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 18,
+                  fontSize: 17,
                   fontWeight: FontWeight.w900,
                   fontStyle: FontStyle.italic,
                   color: HeatColors.heatRed,
@@ -94,9 +137,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 8),
               const Text(
-                'Entraîne-toi aux règles officielles du jeu de base : '
-                'gestion des 9 étapes du tour, boîte de vitesses, cartes Stress & Heat, '
-                'refroidissement, boost et maîtrise des virages.',
+                'Affronte 2 pilotes adverses en mode Shadow (vrais paquets, aucune triche) '
+                'selon les 9 étapes officielles : jet de dés de départ, boîte de vitesses, '
+                'cartes Stress & Heat, aspiration et gestion des virages.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 13.5,
@@ -104,27 +147,26 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: HeatColors.inkDark,
                 ),
               ),
-              const SizedBox(height: 16),
-              Wrap(
-                spacing: 10,
+              const SizedBox(height: 14),
+              const Wrap(
+                spacing: 8,
                 runSpacing: 8,
                 alignment: WrapAlignment.center,
-                children: const [
-                  _InfoPill(icon: Icons.person, text: 'Solo / Entraînement'),
-                  _InfoPill(icon: Icons.menu_book, text: 'Règles de base'),
-                  _InfoPill(icon: Icons.flag, text: 'Circuit Allemagne'),
+                children: [
+                  _InfoPill(icon: Icons.smart_toy, text: '2 Bots Shadow'),
+                  _InfoPill(icon: Icons.casino, text: 'Jet de dés'),
+                  _InfoPill(icon: Icons.flag, text: 'Allemagne'),
                 ],
               ),
             ],
           ),
         ),
 
-        const SizedBox(height: 28),
+        const SizedBox(height: 24),
 
-        // Bouton JOUER
         SizedBox(
           width: 260,
-          height: 58,
+          height: 56,
           child: ElevatedButton.icon(
             onPressed: () {
               setState(() {
@@ -151,7 +193,88 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ),
+
+        const SizedBox(height: 20),
+        _buildUpdateStatusBar(),
       ],
+    );
+  }
+
+  Widget _buildUpdateStatusBar() {
+    final isAndroid = !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final hasUpdate = _pendingUpdate != null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: hasUpdate
+            ? HeatColors.cooldownBlue.withValues(alpha: 0.12)
+            : HeatColors.paperCard.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: hasUpdate ? HeatColors.cooldownBlue : HeatColors.paperBorder,
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                hasUpdate
+                    ? Icons.system_update_alt_rounded
+                    : Icons.verified_outlined,
+                size: 18,
+                color: hasUpdate
+                    ? HeatColors.cooldownBlue
+                    : HeatColors.trackGreen,
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  _isCheckingUpdate
+                      ? 'Vérification des mises à jour…'
+                      : hasUpdate
+                          ? 'Mise à jour disponible : v${_pendingUpdate!.version} (Build ${_pendingUpdate!.buildNumber})'
+                          : 'Heat v$appVersionLabel (Build $appBuildNumber)${isAndroid ? " • À jour" : " • Web"}',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: HeatColors.navyHeader,
+                  ),
+                ),
+              ),
+              if (isAndroid && !_isCheckingUpdate && !hasUpdate) ...[
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: _checkLaunchUpdate,
+                  child: const Icon(
+                    Icons.refresh,
+                    size: 18,
+                    color: HeatColors.navyHeader,
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (hasUpdate) ...[
+            const SizedBox(height: 8),
+            ElevatedButton.icon(
+              onPressed: () => AppUpdateService.promptUpdate(
+                context,
+                _pendingUpdate!,
+                isForced: false,
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: HeatColors.cooldownBlue,
+              ),
+              icon: const Icon(Icons.download_rounded, size: 18),
+              label: const Text('Installer la mise à jour'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -178,8 +301,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         const SizedBox(height: 18),
-
-        // Carte du circuit Allemagne (seul circuit disponible)
         Container(
           decoration: BoxDecoration(
             color: HeatColors.paperCard,
@@ -217,7 +338,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       decoration: BoxDecoration(
                         color: HeatColors.navyHeader.withValues(alpha: 0.92),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: HeatColors.heatGold, width: 1.5),
+                        border: Border.all(
+                          color: HeatColors.heatGold,
+                          width: 1.5,
+                        ),
                       ),
                       child: const Text(
                         'ALLEMAGNE — DEUTSCHLAND',
@@ -242,9 +366,12 @@ class _HomeScreenState extends State<HomeScreen> {
                       runSpacing: 8,
                       children: [
                         _TrackStatChip(label: '62 cases'),
-                        _TrackStatChip(label: '6 virages (5 • 2 • 2 • 6 • 4 • 4)'),
+                        _TrackStatChip(
+                          label: '6 virages (5 • 2 • 2 • 6 • 4 • 4)',
+                        ),
                         _TrackStatChip(label: '5 Heat moteur'),
                         _TrackStatChip(label: '3 Stress départ'),
+                        _TrackStatChip(label: 'Toi + 2 Bots Shadow'),
                       ],
                     ),
                     const SizedBox(height: 14),
@@ -383,19 +510,15 @@ class _TrackStatChip extends StatelessWidget {
 class _VintageRacingBgPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
-    // Fond crème vintage
     canvas.drawRect(
       Offset.zero & size,
       Paint()..color = HeatColors.paperCream,
     );
 
-    // Bandes diagonales vintage style course (subtiles en arrière-plan)
     final navyStripe = Paint()
       ..color = HeatColors.navyHeader.withValues(alpha: 0.06);
     final redStripe = Paint()
       ..color = HeatColors.heatRed.withValues(alpha: 0.07);
-    final goldStripe = Paint()
-      ..color = HeatColors.heatGold.withValues(alpha: 0.12);
 
     final path1 = Path()
       ..moveTo(0, 0)
@@ -411,9 +534,14 @@ class _VintageRacingBgPainter extends CustomPainter {
       ..close();
     canvas.drawPath(path2, redStripe);
 
-    // Liseré or haut et bas
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, 8), Paint()..color = HeatColors.navyHeader);
-    canvas.drawRect(Rect.fromLTWH(0, 8, size.width, 3), goldStripe..color = HeatColors.heatGold);
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, 8),
+      Paint()..color = HeatColors.navyHeader,
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(0, 8, size.width, 3),
+      Paint()..color = HeatColors.heatGold,
+    );
     canvas.drawRect(
       Rect.fromLTWH(0, size.height - 8, size.width, 8),
       Paint()..color = HeatColors.navyHeader,

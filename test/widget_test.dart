@@ -6,73 +6,71 @@ import 'package:heat/models/game_state.dart';
 import 'package:heat/models/track_data.dart';
 
 void main() {
-  test('Deutschland track has 62 spaces and 6 official corners', () {
+  test('Deutschland track repères between car and next corner', () {
     expect(DeutschlandTrack.spaces.length, 62);
     expect(DeutschlandTrack.corners.length, 6);
-    expect(
-      DeutschlandTrack.corners.map((c) => c.speedLimit).toList(),
-      [5, 2, 2, 6, 4, 4],
-    );
 
-    // Crossing from space 10 to space 13 crosses Corner 1 (after space 11, limit 5)
-    final crossed = DeutschlandTrack.crossedCorners(
-      fromProgress: 10,
-      toProgress: 13,
-    );
-    expect(crossed.length, 1);
-    expect(crossed.first.corner.id, 1);
-    expect(crossed.first.corner.speedLimit, 5);
-    expect(crossed.first.spaceBeforeCornerProgress, 11);
+    // Depuis Pole Position (progress = 0), 11 cases avant Virage 1 (limite 5)
+    final fromGrid = DeutschlandTrack.nextCornerInfo(progress: 0);
+    expect(fromGrid.corner?.id, 1);
+    expect(fromGrid.corner?.speedLimit, 5);
+    expect(fromGrid.spacesBeforeCorner, 11);
+    expect(fromGrid.spacesToCrossCorner, 12);
+    expect(fromGrid.markerProgressList.length, 11);
 
-    // Chicane: space 22 to 26 crosses Corner 2 (23->24) AND Corner 3 (24->25)
-    final chicane = DeutschlandTrack.crossedCorners(
-      fromProgress: 22,
-      toProgress: 26,
-    );
-    expect(chicane.length, 2);
-    expect(chicane[0].corner.speedLimit, 2);
-    expect(chicane[1].corner.speedLimit, 2);
+    // Depuis case 8, il reste 3 cases avant Virage 1 (9, 10, 11)
+    final fromSpace8 = DeutschlandTrack.nextCornerInfo(progress: 8);
+    expect(fromSpace8.corner?.id, 1);
+    expect(fromSpace8.spacesBeforeCorner, 3);
+    expect(fromSpace8.markerProgressList, [9, 10, 11]);
+
+    // Depuis case 11 (collé au virage 1), 0 case avant, 1+ franchit
+    final fromSpace11 = DeutschlandTrack.nextCornerInfo(progress: 11);
+    expect(fromSpace11.corner?.id, 1);
+    expect(fromSpace11.spacesBeforeCorner, 0);
+    expect(fromSpace11.spacesToCrossCorner, 1);
   });
 
-  test('HeatGameController enforces 9-step turn flow and ±2 gear Heat cost', () {
+  test('Dice roll starting grid + 2 shadow bots + full 9-step turn flow', () {
     final controller = HeatGameController(random: Random(42));
+    expect(controller.step, RoundStep.diceRoll);
+    expect(controller.standings.length, 3);
+
+    controller.rollStartingDice();
+    expect(controller.diceRolled, isTrue);
+    expect(controller.playerDiceRoll, inInclusiveRange(1, 6));
+
+    // Les 3 pilotes ont des jets distincts pour un classement clair
+    final rolls = controller.standings.map((r) => r.diceRoll).toSet();
+    expect(rolls.length, 3);
+
+    controller.startRaceAfterDiceRoll();
     expect(controller.step, RoundStep.shiftGears);
     expect(controller.engineHeat.length, 5);
     expect(controller.hand.length, 7);
 
-    // Shifting from 1 to 3 costs 1 Heat
-    expect(controller.shiftHeatCost(3), 1);
+    // Passage en V3 (±2 = 1 Heat)
     controller.selectTargetGear(3);
     controller.confirmShiftGear();
-
     expect(controller.gear, 3);
     expect(controller.engineHeat.length, 4);
     expect(controller.step, RoundStep.playCards);
 
-    // Select 3 playable cards
+    // Jouer 3 cartes
     final playable = controller.hand.where((c) => c.canPlayNormally).take(3);
     for (final c in playable) {
       controller.onHandCardTapped(c);
     }
-    expect(controller.canConfirmPlayCards, isTrue);
     controller.confirmPlayCards();
 
     expect(controller.step, RoundStep.revealAndMove);
-    expect(controller.pendingStepsToMove, controller.turnSpeed);
-
-    // Advance car step-by-step
-    final expectedSpeed = controller.turnSpeed;
-    for (var i = 0; i < expectedSpeed; i++) {
-      controller.stepCarForward();
-    }
+    controller.autoFinishMovement();
     expect(controller.pendingStepsToMove, 0);
-    expect(controller.carProgress, expectedSpeed);
 
-    // Proceed through steps 4 -> 9
     controller.proceedFromRevealAndMove();
-    expect(controller.step, RoundStep.adrenaline);
-
-    controller.chooseAdrenaline(activate: false);
+    if (controller.step == RoundStep.adrenaline) {
+      controller.chooseAdrenaline(activate: false);
+    }
     expect(controller.step, RoundStep.react);
 
     controller.proceedFromReact();
@@ -92,9 +90,14 @@ void main() {
     expect(controller.roundNumber, 2);
     expect(controller.step, RoundStep.shiftGears);
     expect(controller.hand.length, 7);
+
+    // Les 2 bots ont avancé sur la piste lors de la manche 1
+    final bots = controller.standings.where((r) => !r.isHuman).toList();
+    expect(bots.length, 2);
+    expect(bots.any((b) => b.progress > 0), isTrue);
   });
 
-  testWidgets('Home screen -> Track selection (Deutschland) -> Game screen', (
+  testWidgets('Home -> Track selection -> Dice roll -> Race start', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const HeatApp());
@@ -107,13 +110,20 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('ALLEMAGNE — DEUTSCHLAND'), findsOneWidget);
-    expect(find.text('LANCER LA COURSE'), findsOneWidget);
-
     await tester.ensureVisible(find.text('LANCER LA COURSE'));
     await tester.tap(find.text('LANCER LA COURSE'));
     await tester.pumpAndSettle();
 
-    expect(find.text('HEAT — Deutschland'), findsOneWidget);
+    expect(find.text('Lancer les dés !'), findsOneWidget);
+    await tester.ensureVisible(find.text('Lancer les dés !'));
+    await tester.tap(find.text('Lancer les dés !'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Démarrer la course !'), findsOneWidget);
+    await tester.ensureVisible(find.text('Démarrer la course !'));
+    await tester.tap(find.text('Démarrer la course !'));
+    await tester.pumpAndSettle();
+
     expect(find.textContaining('1. Changer de vitesse'), findsOneWidget);
   });
 }

@@ -39,6 +39,27 @@ class CrossedCornerEvent {
   final int spaceBeforeCornerProgress;
 }
 
+/// Information de repère calculée entre la voiture et le prochain virage.
+class NextCornerInfo {
+  const NextCornerInfo({
+    required this.corner,
+    required this.spacesBeforeCorner,
+    required this.markerProgressList,
+  });
+
+  /// Prochain virage à venir (null si seule la ligne d'arrivée finale reste devant).
+  final TrackCorner? corner;
+
+  /// Nombre exact de cases pouvant être parcourues SANS franchir le prochain virage
+  /// (0 = voiture collée à la ligne de virage, donc +1 la franchit).
+  final int spacesBeforeCorner;
+
+  /// Progressions des cases situées entre la voiture et la ligne du prochain virage.
+  final List<int> markerProgressList;
+
+  int get spacesToCrossCorner => spacesBeforeCorner + 1;
+}
+
 /// Représente une case du circuit sur l'image normalisée [0..1] x [0..1].
 class TrackSpace {
   const TrackSpace({
@@ -67,6 +88,21 @@ class TrackSpace {
 
   /// Limite de vitesse du prochain virage.
   final int nextCornerSpeedLimit;
+
+  /// Position décalée sur la voie intérieure (lane 0) ou extérieure (lane 1)
+  /// pour permettre à 2 voitures de tenir côte à côte dans la même case.
+  Offset positionForLane(int lane) {
+    // Normale perpendiculaire à l'angle de déplacement dans l'espace visuel
+    final nx = -math.sin(angle);
+    final ny = math.cos(angle);
+    // lane 0 = corde (droite du sens horaire), lane 1 = extérieur (gauche)
+    final sign = lane == 0 ? 1.0 : -1.0;
+    const visualOffset = 0.0145;
+    return Offset(
+      position.dx + (nx * visualOffset * sign) / DeutschlandTrack.imageAspectRatio,
+      position.dy + (ny * visualOffset * sign),
+    );
+  }
 }
 
 class _TrackSegmentSpec {
@@ -80,9 +116,6 @@ class _TrackSegmentSpec {
   final int spaceCount;
   final List<Offset> points;
   final int nextCornerSpeedLimit;
-
-  /// Valeur du compte à rebours sur la dernière case du segment (0 avant un virage,
-  /// 11 juste avant la ligne d'arrivée).
   final int countdownEnd;
 }
 
@@ -98,8 +131,6 @@ class DeutschlandTrack {
   static const int stressCount = 3;
   static const double imageAspectRatio = 1024 / 699;
 
-  /// Les 6 virages officiels lus directement sur le plateau Deutschland :
-  /// Segments : 11 + 12 + 1 + 13 + 8 + 7 + 10 = 62 cases exactes.
   static const List<TrackCorner> corners = [
     TrackCorner(
       id: 1,
@@ -147,14 +178,13 @@ class DeutschlandTrack {
 
   static final List<TrackSpace> spaces = _buildSpaces();
 
-  /// Retourne la case visuelle correspondant à une progression totale `progress`.
-  /// `progress == 0` correspond à la Pole Position (case 62, juste derrière la ligne).
+  /// Retourne la case visuelle correspondant à une progression `progress`.
+  /// - `progress == 0` : case 62 (grille positions 1 & 2, juste derrière la ligne)
+  /// - `progress == -1` : case 61 (grille positions 3 & 4)
+  /// - `progress >= 1` : case `((progress - 1) % 62) + 1`
   static TrackSpace spaceForProgress(int progress) {
-    if (progress <= 0) {
-      return spaces[totalSpaces - 1];
-    }
-    final index = (progress - 1) % totalSpaces;
-    return spaces[index];
+    final idx = ((progress - 1) % totalSpaces + totalSpaces) % totalSpaces;
+    return spaces[idx];
   }
 
   /// Numéro de tour courant (1..totalLaps, ou > totalLaps si ligne finale franchie).
@@ -163,9 +193,49 @@ class DeutschlandTrack {
     return ((progress - 1) ~/ totalSpaces) + 1;
   }
 
+  /// Calcule dynamiquement les repères entre la position actuelle `progress`
+  /// de la voiture et le prochain virage (ou la ligne d'arrivée finale).
+  static NextCornerInfo nextCornerInfo({
+    required int progress,
+    int totalLaps = defaultLaps,
+  }) {
+    final finishProgress = totalLaps * totalSpaces;
+    if (progress >= finishProgress) {
+      return const NextCornerInfo(
+        corner: null,
+        spacesBeforeCorner: 0,
+        markerProgressList: [],
+      );
+    }
+
+    // Parcours pas à pas à partir de progress jusqu'au premier virage ou à l'arrivée
+    final markers = <int>[];
+    for (var p = progress; p < finishProgress; p++) {
+      if (p > 0) {
+        final spaceNum = ((p - 1) % totalSpaces) + 1;
+        for (final corner in corners) {
+          if (corner.afterSpaceNumber == spaceNum) {
+            return NextCornerInfo(
+              corner: corner,
+              spacesBeforeCorner: markers.length,
+              markerProgressList: markers,
+            );
+          }
+        }
+      }
+      markers.add(p + 1);
+    }
+
+    // Plus aucun virage avant la ligne d'arrivée finale
+    return NextCornerInfo(
+      corner: null,
+      spacesBeforeCorner: markers.length,
+      markerProgressList: markers,
+    );
+  }
+
   /// Liste ordonnée des lignes de virages franchies en avançant de `fromProgress`
-  /// à `toProgress` (en ignorant tout virage situé après la ligne d'arrivée finale,
-  /// conformément à la règle p. 7).
+  /// à `toProgress` (en ignorant tout virage après la ligne d'arrivée finale, p. 7).
   static List<CrossedCornerEvent> crossedCorners({
     required int fromProgress,
     required int toProgress,
@@ -177,7 +247,6 @@ class DeutschlandTrack {
     final crossed = <CrossedCornerEvent>[];
 
     for (var p = fromProgress; p < toProgress; p++) {
-      // Après la ligne d'arrivée finale, on ignore les limites de virages (p. 7).
       if (p >= finishProgress) break;
       if (p <= 0) continue;
 
@@ -197,7 +266,6 @@ class DeutschlandTrack {
   }
 
   static const List<_TrackSegmentSpec> _segments = [
-    // Segment 0 : Ligne d'arrivée -> Virage 1 (5) : 11 cases (10..0)
     _TrackSegmentSpec(
       spaceCount: 11,
       nextCornerSpeedLimit: 5,
@@ -210,7 +278,6 @@ class DeutschlandTrack {
         Offset(0.078, 0.235),
       ],
     ),
-    // Segment 1 : Virage 1 (5) -> Virage 2 (2) : 12 cases (11..0)
     _TrackSegmentSpec(
       spaceCount: 12,
       nextCornerSpeedLimit: 2,
@@ -224,7 +291,6 @@ class DeutschlandTrack {
         Offset(0.526, 0.185),
       ],
     ),
-    // Segment 2 : Virage 2 (2) -> Virage 3 (2) : 1 case (0)
     _TrackSegmentSpec(
       spaceCount: 1,
       nextCornerSpeedLimit: 2,
@@ -234,7 +300,6 @@ class DeutschlandTrack {
         Offset(0.578, 0.180),
       ],
     ),
-    // Segment 3 : Virage 3 (2) -> Virage 4 (6) : 13 cases (12..0)
     _TrackSegmentSpec(
       spaceCount: 13,
       nextCornerSpeedLimit: 6,
@@ -249,7 +314,6 @@ class DeutschlandTrack {
         Offset(0.870, 0.835),
       ],
     ),
-    // Segment 4 : Virage 4 (6) -> Virage 5 (4) : 8 cases (7..0)
     _TrackSegmentSpec(
       spaceCount: 8,
       nextCornerSpeedLimit: 4,
@@ -262,7 +326,6 @@ class DeutschlandTrack {
         Offset(0.520, 0.840),
       ],
     ),
-    // Segment 5 : Virage 5 (4) -> Virage 6 (4) : 7 cases (6..0)
     _TrackSegmentSpec(
       spaceCount: 7,
       nextCornerSpeedLimit: 4,
@@ -276,7 +339,6 @@ class DeutschlandTrack {
         Offset(0.790, 0.705),
       ],
     ),
-    // Segment 6 : Virage 6 (4) -> Ligne d'arrivée : 10 cases (20..11)
     _TrackSegmentSpec(
       spaceCount: 10,
       nextCornerSpeedLimit: 5,

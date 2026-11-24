@@ -1,9 +1,14 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import '../models/game_state.dart';
 import '../theme/heat_theme.dart';
 
-/// Barre des 9 étapes officielles du tour (style compteurs p. 4 du PDF)
-/// + jet de dés initial + panneau d'action interactif.
+/// Panneau de suivi complet :
+/// 1. Suivi de l'ordre de passage des 3 voitures (au-dessus des étapes)
+/// 2. Barre des 9 étapes officielles du tour
+/// 3. Bandeau explicite des mouvements Heat / Moteur
+/// 4. Contrôles de l'étape active (y compris tour visible des bots)
 class TurnStepperPanel extends StatelessWidget {
   const TurnStepperPanel({
     super.key,
@@ -33,9 +38,19 @@ class TurnStepperPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (step != RoundStep.diceRoll) ...[
+          if (step != RoundStep.diceRoll && step != RoundStep.finished) ...[
+            _buildTurnOrderTracker(),
+            const SizedBox(height: 8),
             _buildStepBadgesRow(step),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
+          ],
+          if (controller.lastHeatNotice != null &&
+              step != RoundStep.diceRoll) ...[
+            _buildHeatMovementBanner(
+              controller.lastHeatNotice!,
+              isCooldown: controller.lastHeatNoticeIsCooldown,
+            ),
+            const SizedBox(height: 8),
           ],
           _buildActiveStepContent(context, step),
         ],
@@ -43,9 +58,188 @@ class TurnStepperPanel extends StatelessWidget {
     );
   }
 
+  /// Suivi des tours de jeu au-dessus des 9 étapes : montre toujours celui qui
+  /// est devant en premier, qui joue en ce moment, et qui attend son tour.
+  Widget _buildTurnOrderTracker() {
+    final order = controller.displayedTurnOrder;
+    final inResolution = controller.turnOrderQueue.isNotEmpty;
+    final activeIdx = controller.activeTurnIndex;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: HeatColors.navyHeader,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: HeatColors.heatGold, width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'SUIVI MANCHE #${controller.roundNumber} — ORDRE DE PASSAGE (1ER DEVANT)',
+                style: const TextStyle(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.7,
+                  color: HeatColors.heatGold,
+                ),
+              ),
+              if (!inResolution)
+                const Text(
+                  'Simultané (1–2)',
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: order.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final driver = entry.value;
+                final isCurrent = inResolution && idx == activeIdx;
+                final isDone = inResolution && idx < activeIdx;
+
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isCurrent
+                            ? driver.color
+                            : (isDone
+                                ? Colors.white.withValues(alpha: 0.14)
+                                : Colors.white.withValues(alpha: 0.08)),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isCurrent
+                              ? HeatColors.heatGold
+                              : (isDone
+                                  ? Colors.greenAccent.withValues(alpha: 0.6)
+                                  : driver.color.withValues(alpha: 0.7)),
+                          width: isCurrent ? 2 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${idx + 1}e',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              color: isCurrent
+                                  ? HeatColors.heatGold
+                                  : Colors.white70,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: isCurrent ? Colors.white : driver.color,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          Text(
+                            driver.name,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight:
+                                  isCurrent ? FontWeight.w900 : FontWeight.w700,
+                              color: isDone ? Colors.white60 : Colors.white,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          if (isDone)
+                            const Icon(
+                              Icons.check_circle,
+                              size: 13,
+                              color: Colors.greenAccent,
+                            )
+                          else if (isCurrent)
+                            const Icon(
+                              Icons.play_arrow_rounded,
+                              size: 15,
+                              color: HeatColors.heatGold,
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (idx < order.length - 1)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 4),
+                        child: Icon(
+                          Icons.chevron_right,
+                          size: 14,
+                          color: Colors.white38,
+                        ),
+                      ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeatMovementBanner(String message, {required bool isCooldown}) {
+    final color = isCooldown ? HeatColors.cooldownBlue : HeatColors.heatRed;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color, width: 1.5),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isCooldown ? Icons.ac_unit : Icons.local_fire_department,
+            size: 18,
+            color: color,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStepBadgesRow(RoundStep current) {
     final roundSteps = RoundStep.values
-        .where((s) => s != RoundStep.diceRoll && s != RoundStep.finished)
+        .where(
+          (s) =>
+              s != RoundStep.diceRoll &&
+              s != RoundStep.botTurn &&
+              s != RoundStep.finished,
+        )
         .toList();
 
     return SingleChildScrollView(
@@ -53,7 +247,7 @@ class TurnStepperPanel extends StatelessWidget {
       child: Row(
         children: roundSteps.map((s) {
           final isActive = s == current;
-          final isDone = current.number > s.number;
+          final isDone = current != RoundStep.botTurn && current.number > s.number;
           final baseColor =
               s.isMandatory ? HeatColors.heatRed : HeatColors.cooldownBlue;
 
@@ -116,6 +310,8 @@ class TurnStepperPanel extends StatelessWidget {
         return _buildShiftGearsStep();
       case RoundStep.playCards:
         return _buildPlayCardsStep();
+      case RoundStep.botTurn:
+        return _buildBotTurnStep();
       case RoundStep.revealAndMove:
         return _buildRevealAndMoveStep();
       case RoundStep.adrenaline:
@@ -135,6 +331,85 @@ class TurnStepperPanel extends StatelessWidget {
     }
   }
 
+  Widget _buildBotTurnStep() {
+    final outcome = controller.activeBotOutcome;
+    final animating = controller.isBotAnimating;
+    final nextDriver = controller.nextDriverInQueue;
+
+    if (outcome == null) return const SizedBox.shrink();
+
+    final buttonLabel = nextDriver != null
+        ? (nextDriver.isHuman
+            ? 'À ton tour ! (${nextDriver.name}) →'
+            : 'Pilote suivant : ${nextDriver.name} →')
+        : 'Terminer la manche →';
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: outcome.botColor.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: outcome.botColor, width: 1.8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 11,
+                backgroundColor: outcome.botColor,
+                child: const Icon(
+                  Icons.directions_car,
+                  size: 13,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Tour de ${outcome.botName} (Mode Shadow)',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14,
+                    color: outcome.botColor,
+                  ),
+                ),
+              ),
+              if (animating)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            animating
+                ? '${outcome.botName} avance sur la piste… (vitesse ${outcome.speed})'
+                : outcome.summary,
+            style: const TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: HeatColors.inkDark,
+            ),
+          ),
+          const SizedBox(height: 10),
+          ElevatedButton.icon(
+            onPressed: controller.proceedAfterBotTurn,
+            style: ElevatedButton.styleFrom(
+              backgroundColor:
+                  nextDriver?.isHuman == true ? HeatColors.heatRed : outcome.botColor,
+            ),
+            icon: const Icon(Icons.arrow_forward, size: 18),
+            label: Text(buttonLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDiceRollStep() {
     final rolled = controller.diceRolled;
     final standings = controller.standings;
@@ -149,7 +424,7 @@ class TurnStepperPanel extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           rolled
-              ? 'Ordre de départ tiré au sort ! Les 2 pilotes adverses jouent en mode Shadow avec leur propre paquet (aucune triche).'
+              ? 'Ordre de départ tiré au sort ! Celui qui est devant commence toujours la résolution.'
               : 'Lance les dés pour déterminer qui part en Pole Position face aux 2 pilotes adverses (Bleu et Vert) !',
           style: const TextStyle(fontSize: 12.5, color: HeatColors.inkDark),
         ),
@@ -282,7 +557,7 @@ class TurnStepperPanel extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'Vitesse actuelle : ${controller.roundStartGear}. '
-          'Reste au même rapport, change de ±1 gratuitement, ou de ±2 pour 1 Heat.',
+          '±1 rapport gratuit • ±2 rapports = défausse 1 Heat du Moteur (${controller.engineHeat.length} disponibles).',
           style: const TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
         ),
         const SizedBox(height: 8),
@@ -297,7 +572,7 @@ class TurnStepperPanel extends StatelessWidget {
               final gCost = controller.shiftHeatCost(g);
               return ChoiceChip(
                 label: Text(
-                  gCost == 1 ? 'V$g (1 Heat)' : 'Vitesse $g',
+                  gCost == 1 ? 'V$g (🔥 -1 Heat)' : 'Vitesse $g',
                   style: TextStyle(
                     fontWeight: FontWeight.w800,
                     color: selected
@@ -317,7 +592,7 @@ class TurnStepperPanel extends StatelessWidget {
               icon: const Icon(Icons.check, size: 18),
               label: Text(
                 cost > 0
-                    ? 'Valider V$target (-1 Heat)'
+                    ? 'Valider V$target (🔥 1 Heat Moteur → Défausse)'
                     : 'Valider Vitesse $target',
               ),
             ),
@@ -347,7 +622,7 @@ class TurnStepperPanel extends StatelessWidget {
         Text(
           cluttered
               ? 'Main encombrée (p. 7) : sélectionne tes cartes jouables et complète avec des cartes Heat (vitesse remise en 1ère sans avancer).'
-              : 'Clique sur $needed carte(s) ci-dessous. Les 2 pilotes adverses jouent leurs cartes simultanément !',
+              : 'Clique sur $needed carte(s) ci-dessous. Les 2 pilotes adverses jouent leurs cartes simultanément, puis le 1er démarre !',
           style: TextStyle(
             fontSize: 12.5,
             color: cluttered ? HeatColors.heatRed : HeatColors.inkMuted,
@@ -359,7 +634,7 @@ class TurnStepperPanel extends StatelessWidget {
           onPressed:
               controller.canConfirmPlayCards ? controller.confirmPlayCards : null,
           icon: const Icon(Icons.visibility, size: 18),
-          label: Text('Révéler & lancer la manche ($selected/$needed)'),
+          label: Text('Valider mes cartes & lancer la manche ($selected/$needed)'),
         ),
       ],
     );
@@ -440,7 +715,9 @@ class TurnStepperPanel extends StatelessWidget {
   Widget _buildReactStep() {
     final pending = controller.pendingStepsToMove;
     final cooldowns = controller.remainingCooldowns;
-    final heatInHand = controller.hand.where((c) => c.isHeat).length;
+    final heatInHand = controller.heatCardsInHandCount;
+    final canCool = controller.canCooldownNow;
+    final maxCoolNow = min(cooldowns, heatInHand);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -453,13 +730,79 @@ class TurnStepperPanel extends StatelessWidget {
             color: HeatColors.cooldownBlue,
           ),
         ),
-        const SizedBox(height: 4),
-        Text(
-          'Refroidissement disponible : $cooldowns ($heatInHand Heat en main, clique dessus pour refroidir). '
-          'Boost : 1 Heat du moteur pour retourner une carte Basic (+vitesse & cases).',
-          style: const TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
+
+        // Encart TRÈS EXPLICITE quand le joueur a des cartes Heat à renvoyer au moteur !
+        if (canCool)
+          Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: HeatColors.cooldownBlue.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: HeatColors.cooldownBlue, width: 2),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.ac_unit,
+                      color: HeatColors.cooldownBlue,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'REFROIDISSEMENT : tu peux renvoyer $maxCoolNow carte(s) Heat de ta main vers le Moteur !',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12.5,
+                          color: HeatColors.navyHeader,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: controller.cooldownOneHeat,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: HeatColors.cooldownBlue,
+                      ),
+                      icon: const Icon(Icons.ac_unit, size: 17),
+                      label: const Text('Refroidir 1 Heat (Main → Moteur)'),
+                    ),
+                    if (maxCoolNow >= 2)
+                      ElevatedButton.icon(
+                        onPressed: controller.cooldownAllPossibleHeat,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: HeatColors.navyHeader,
+                        ),
+                        icon: const Icon(Icons.done_all, size: 17),
+                        label: Text('Tout refroidir ($maxCoolNow Heat)'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              cooldowns > 0
+                  ? 'Refroidissement disponible ($cooldowns), mais aucune carte Heat dans ta main.'
+                  : 'Refroidissement : 0 disponible en Vitesse ${controller.gear}.',
+              style: const TextStyle(fontSize: 12, color: HeatColors.inkMuted),
+            ),
+          ),
+
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -475,7 +818,9 @@ class TurnStepperPanel extends StatelessWidget {
               ),
               icon: const Icon(Icons.local_fire_department, size: 18),
               label: Text(
-                controller.boostUsed ? 'Boost utilisé' : 'Boost (1 Heat)',
+                controller.boostUsed
+                    ? 'Boost utilisé'
+                    : 'Boost (🔥 1 Heat Moteur → Défausse)',
               ),
             ),
             if (controller.adrenalineEnabled)
@@ -500,11 +845,22 @@ class TurnStepperPanel extends StatelessWidget {
           _buildMovementButtonsRow(onContinue: null, continueLabel: ''),
         ] else ...[
           const SizedBox(height: 8),
-          ElevatedButton.icon(
-            onPressed: controller.proceedFromReact,
-            icon: const Icon(Icons.arrow_forward, size: 18),
-            label: const Text('Étape 6 : Aspiration'),
-          ),
+          if (canCool)
+            OutlinedButton.icon(
+              onPressed: controller.proceedFromReact,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: HeatColors.heatOrange,
+                side: const BorderSide(color: HeatColors.heatOrange),
+              ),
+              icon: const Icon(Icons.warning_amber, size: 18),
+              label: const Text('Passer SANS refroidir → Étape 6'),
+            )
+          else
+            ElevatedButton.icon(
+              onPressed: controller.proceedFromReact,
+              icon: const Icon(Icons.arrow_forward, size: 18),
+              label: const Text('Étape 6 : Aspiration'),
+            ),
         ],
       ],
     );
@@ -529,7 +885,7 @@ class TurnStepperPanel extends StatelessWidget {
         Text(
           hasTarget
               ? 'Un pilote adverse est juste à côté ou 1 case devant toi ! '
-                  'Tu peux prendre l\'aspiration (+2 cases gratuites, ne compte PAS pour la vitesse en virage).'
+                  'Tu peux prendre l\'aspiration (+2 cases gratuites, ne compte PAS pour les virages).'
               : 'Aucune voiture adverse à côté ou 1 case devant toi ce tour.',
           style: TextStyle(
             fontSize: 12.5,
@@ -601,7 +957,7 @@ class TurnStepperPanel extends StatelessWidget {
                   child: Row(
                     children: [
                       Icon(
-                        danger ? Icons.warning_amber : Icons.check_circle,
+                        danger ? Icons.local_fire_department : Icons.check_circle,
                         size: 16,
                         color: danger
                             ? HeatColors.heatRed
@@ -611,10 +967,10 @@ class TurnStepperPanel extends StatelessWidget {
                       Expanded(
                         child: Text(
                           '${e.corner.name} — Limite ${e.corner.speedLimit} '
-                          '${danger ? "→ Coût : $diff Heat !" : "→ Vitesse OK"}',
+                          '${danger ? "→ 🔥 Défausser $diff Heat (Moteur → Défausse) !" : "→ Vitesse OK"}',
                           style: TextStyle(
                             fontSize: 12.5,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w800,
                             color: danger
                                 ? HeatColors.heatRed
                                 : HeatColors.trackGreen,
@@ -674,8 +1030,8 @@ class TurnStepperPanel extends StatelessWidget {
                             '(${r.heatRequired} Heat requis, ${r.heatPaid} payé) → '
                             'Retour avant le virage, +${r.stressTaken} Stress, vitesse 1.'
                         : (r.heatPaid > 0
-                            ? '${r.corner.name} (limite ${r.corner.speedLimit}) : '
-                                '${r.heatPaid} Heat payé(s).'
+                            ? '🔥 ${r.corner.name} (limite ${r.corner.speedLimit}) : '
+                                '${r.heatPaid} Heat déplacée(s) Moteur → Défausse.'
                             : '${r.corner.name} (limite ${r.corner.speedLimit}) : '
                                 'Virage parfaitement négocié !'),
                     style: const TextStyle(
@@ -704,7 +1060,7 @@ class TurnStepperPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '8. Défausser (optionnel)',
+          '8. Défausser des cartes de ta main (optionnel)',
           style: TextStyle(
             fontWeight: FontWeight.w900,
             fontSize: 14,
@@ -713,8 +1069,8 @@ class TurnStepperPanel extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         const Text(
-          'Clique sur les cartes de ta main que tu souhaites défausser '
-          '(impossible de défausser Stress et Heat).',
+          'Clique sur les cartes Basic que tu veux défausser avant de repiocher. '
+          'Les cartes Stress et Heat sont verrouillées (🔒 non défaussables).',
           style: TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
         ),
         const SizedBox(height: 8),
@@ -724,7 +1080,7 @@ class TurnStepperPanel extends StatelessWidget {
           label: Text(
             selected > 0
                 ? 'Défausser $selected carte(s) → Étape 9'
-                : 'Ne rien défausser → Étape 9',
+                : 'Garder ma main → Étape 9',
           ),
         ),
       ],
@@ -732,6 +1088,7 @@ class TurnStepperPanel extends StatelessWidget {
   }
 
   Widget _buildReplenishStep() {
+    final nextDriver = controller.nextDriverInQueue;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -744,9 +1101,11 @@ class TurnStepperPanel extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 4),
-        const Text(
-          'Défausse la zone de jeu, repioche jusqu\'à 7 cartes, puis les pilotes derrière toi terminent la manche.',
-          style: TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
+        Text(
+          nextDriver != null
+              ? 'Défausse ta zone de jeu, repioche jusqu\'à 7 cartes, puis ${nextDriver.name} joue son tour.'
+              : 'Défausse ta zone de jeu et repioche jusqu\'à 7 cartes pour lancer la manche suivante.',
+          style: const TextStyle(fontSize: 12.5, color: HeatColors.inkMuted),
         ),
         const SizedBox(height: 8),
         ElevatedButton.icon(
@@ -756,9 +1115,11 @@ class TurnStepperPanel extends StatelessWidget {
           ),
           icon: const Icon(Icons.style, size: 18),
           label: Text(
-            controller.hasCrossedFinishLine
-                ? 'Franchir l\'arrivée !'
-                : 'Compléter à 7 cartes & Manche suivante',
+            nextDriver != null
+                ? 'Compléter à 7 → Tour de ${nextDriver.name}'
+                : (controller.hasCrossedFinishLine
+                    ? 'Franchir l\'arrivée !'
+                    : 'Compléter à 7 cartes & Manche suivante'),
           ),
         ),
       ],

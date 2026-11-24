@@ -459,17 +459,114 @@ class PlayerDashboard extends StatelessWidget {
               children: controller.hand.map((card) {
                 final selected = controller.selectedCardIds.contains(card.id);
                 final interactive = controller.canToggleCardInHand(card);
-                return HeatCardWidget(
-                  card: card,
-                  width: 72,
-                  height: 102,
-                  selected: selected,
-                  enabled: interactive ||
-                      (step != RoundStep.playCards &&
-                          step != RoundStep.discard &&
-                          step != RoundStep.react),
-                  onTap:
-                      interactive ? () => controller.onHandCardTapped(card) : null,
+                final highlightCooldown = step == RoundStep.react &&
+                    controller.remainingCooldowns > 0 &&
+                    card.isHeat;
+                final showLockedDiscard =
+                    step == RoundStep.discard && !card.canDiscard;
+                final showSelectedDiscard =
+                    step == RoundStep.discard && selected;
+
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    HeatCardWidget(
+                      card: card,
+                      width: 72,
+                      height: 102,
+                      selected: selected || highlightCooldown,
+                      enabled: interactive ||
+                          (step != RoundStep.playCards &&
+                              step != RoundStep.discard &&
+                              step != RoundStep.react),
+                      onTap: interactive
+                          ? () => controller.onHandCardTapped(card)
+                          : null,
+                    ),
+                    if (highlightCooldown)
+                      Positioned(
+                        top: -10,
+                        left: -2,
+                        right: -2,
+                        child: IgnorePointer(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: HeatColors.cooldownBlue,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.white, width: 1),
+                            ),
+                            child: const Text(
+                              '❄️ MOTEUR',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 8.5,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (showSelectedDiscard)
+                      Positioned(
+                        top: -10,
+                        left: -2,
+                        right: -2,
+                        child: IgnorePointer(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: HeatColors.heatRed,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.white, width: 1),
+                            ),
+                            child: const Text(
+                              'DÉFAUSSER',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 8,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (showLockedDiscard)
+                      Positioned(
+                        bottom: 20,
+                        left: 4,
+                        right: 4,
+                        child: IgnorePointer(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 3,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.78),
+                              borderRadius: BorderRadius.circular(5),
+                            ),
+                            child: const Text(
+                              '🔒 Garder',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 8,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 );
               }).toList(),
             ),

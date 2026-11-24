@@ -18,6 +18,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _showTrackSelection = false;
   int _selectedLaps = DeutschlandTrack.defaultLaps;
+  bool _includeStartingUpgrades = false;
 
   RemoteAppVersion? _pendingUpdate;
   bool _isCheckingUpdate = false;
@@ -42,7 +43,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void _startDeutschlandRace() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => GameScreen(totalLaps: _selectedLaps),
+        builder: (_) => GameScreen(
+          totalLaps: _selectedLaps,
+          includeStartingUpgrades: _includeStartingUpgrades,
+        ),
       ),
     );
   }
@@ -412,6 +416,45 @@ class _HomeScreenState extends State<HomeScreen> {
                           onSelected: (_) => setState(() => _selectedLaps = 2),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 12),
+                    Material(
+                      color: HeatColors.paperCream,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: const BorderSide(color: HeatColors.paperBorder),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        child: SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          activeThumbColor: HeatColors.heatRed,
+                          title: const Text(
+                            'Cartes Amélioration de départ (0, 5 & +1 Heat)',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: HeatColors.navyHeader,
+                            ),
+                          ),
+                          subtitle: Text(
+                            _includeStartingUpgrades
+                                ? 'Activé : paquet de 18 cartes (avec 0, 5 et 1 Heat de départ)'
+                                : 'Désactivé (Mode Compétition) : 12 Basic + 3 Stress (sans 0 ni 5)',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              color: HeatColors.inkMuted,
+                            ),
+                          ),
+                          value: _includeStartingUpgrades,
+                          onChanged: (v) =>
+                              setState(() => _includeStartingUpgrades = v),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 16),
                     SizedBox(

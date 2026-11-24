@@ -14,6 +14,7 @@ class TrackBoard extends StatefulWidget {
     required this.nextCornerInfo,
     required this.pendingStepsToMove,
     required this.showSpaceMarkers,
+    this.activeRacerId,
     this.onStepForwardTapped,
     this.onBoardTouchChanged,
   });
@@ -23,6 +24,7 @@ class TrackBoard extends StatefulWidget {
   final NextCornerInfo nextCornerInfo;
   final int pendingStepsToMove;
   final bool showSpaceMarkers;
+  final String? activeRacerId;
   final VoidCallback? onStepForwardTapped;
   final ValueChanged<bool>? onBoardTouchChanged;
 
@@ -480,21 +482,44 @@ class _TrackBoardState extends State<TrackBoard> {
     required double carThickness,
   }) {
     final space = DeutschlandTrack.spaceForProgress(racer.progress);
-    final pos = space.positionForLane(racer.lane);
+    final carsOnSameSpace = widget.racers
+        .where((other) => !other.finished && other.progress == racer.progress)
+        .length;
+    final pos = space.positionForLane(
+      racer.lane,
+      isSharedSpace: carsOnSameSpace > 1,
+    );
+    final isActive = widget.activeRacerId == racer.id;
+
     return AnimatedPositioned(
       key: ValueKey('car_${racer.id}'),
-      duration: const Duration(milliseconds: 240),
+      duration: const Duration(milliseconds: 190),
       curve: Curves.easeOutCubic,
       left: pos.dx * width - carLength / 2,
       top: pos.dy * height - carThickness / 2,
       child: IgnorePointer(
         child: Transform.rotate(
+          alignment: Alignment.center,
           angle: space.angle,
-          child: _RaceCarWidget(
-            width: carLength,
-            height: carThickness,
-            bodyColor: racer.color,
-            isPlayer: racer.isHuman,
+          child: Container(
+            decoration: isActive
+                ? BoxDecoration(
+                    borderRadius: BorderRadius.circular(carThickness),
+                    boxShadow: [
+                      BoxShadow(
+                        color: HeatColors.heatGold.withValues(alpha: 0.9),
+                        blurRadius: 10,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  )
+                : null,
+            child: _RaceCarWidget(
+              width: carLength,
+              height: carThickness,
+              bodyColor: racer.color,
+              isPlayer: racer.isHuman,
+            ),
           ),
         ),
       ),

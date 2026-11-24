@@ -33,9 +33,42 @@ class RacerTrackState {
   int? finishRank;
 }
 
-/// Pilote adverse en mode Shadow : possède son propre deck complet (18 cartes),
-/// son moteur (5 Heat), sa main (7 cartes) et sa défausse, et applique exactement
-/// les mêmes règles que le joueur, sans aucune triche.
+/// Résultat animable du tour d'un bot en mode Shadow.
+class BotTurnOutcome {
+  const BotTurnOutcome({
+    required this.botId,
+    required this.botName,
+    required this.botColor,
+    required this.startProgress,
+    required this.finalProgress,
+    required this.finalLane,
+    required this.pathProgresses,
+    required this.speed,
+    required this.gear,
+    required this.usedSlipstream,
+    required this.spunOut,
+    required this.summary,
+  });
+
+  final String botId;
+  final String botName;
+  final Color botColor;
+  final int startProgress;
+  final int finalProgress;
+  final int finalLane;
+
+  /// Suite des cases parcourues une par une (pour voir la voiture avancer !).
+  final List<int> pathProgresses;
+  final int speed;
+  final int gear;
+  final bool usedSlipstream;
+  final bool spunOut;
+  final String summary;
+}
+
+/// Pilote adverse en mode Shadow : possède son propre deck complet, son moteur
+/// (5 Heat), sa main (7 cartes) et sa défausse, et applique exactement les
+/// mêmes règles que le joueur, sans aucune triche.
 class ShadowBot {
   ShadowBot({
     required this.id,
@@ -43,15 +76,14 @@ class ShadowBot {
     required this.color,
     required this.aggressiveness,
     required this.random,
+    bool includeStartingUpgrades = false,
   }) {
-    reset();
+    reset(includeStartingUpgrades: includeStartingUpgrades);
   }
 
   final String id;
   final String name;
   final Color color;
-
-  /// 0.0 (prudent) à 1.0 (offensif) pour différencier les 2 bots.
   final double aggressiveness;
   final Random random;
 
@@ -86,7 +118,7 @@ class ShadowBot {
         finishRank: finishRank,
       );
 
-  void reset() {
+  void reset({bool includeStartingUpgrades = false}) {
     progress = 0;
     lane = 0;
     diceRoll = 1;
@@ -96,7 +128,9 @@ class ShadowBot {
     _roundStartProgress = 0;
     _plannedCluttered = false;
 
-    _drawPile = createDeutschlandStarterDeck()..shuffle(random);
+    _drawPile = createDeutschlandStarterDeck(
+      includeStartingUpgrades: includeStartingUpgrades,
+    )..shuffle(random);
     _engineHeat = createDeutschlandEngineHeat();
     _hand = [];
     _playArea = [];
@@ -104,8 +138,7 @@ class ShadowBot {
     _drawUpToSeven();
   }
 
-  /// Étapes 1 & 2 (simultanées avec le joueur) :
-  /// Le bot choisit sa vitesse et ses cartes depuis sa vraie main de 7 cartes.
+  /// Étapes 1 & 2 (simultanées avec le joueur).
   void planTurn({required int totalLaps}) {
     if (finished) return;
     _roundStartProgress = progress;
@@ -137,7 +170,6 @@ class ShadowBot {
       if (availableHeat < 0) continue;
 
       if (playable.length < g) {
-        // Main encombrée possible : très mauvais score, utilisé uniquement si aucun choix légal
         const score = -500.0;
         if (score > bestScore) {
           bestScore = score;
@@ -177,11 +209,9 @@ class ShadowBot {
 
         double score = estSpeed * 3.8 - shiftCost * 4.2;
 
-        // Gestion des virages : éviter absolument le tête-à-queue
         if (estHeatCost > availableHeat) {
           score -= 140.0 + (estHeatCost - availableHeat) * 25.0;
         } else {
-          // Dépenser du Heat est acceptable selon l'agressivité et le stock restant
           final heatPenalty = (3.4 - aggressiveness * 1.4);
           score -= estHeatCost * heatPenalty;
         }
@@ -190,16 +220,13 @@ class ShadowBot {
           score -= (1.0 - aggressiveness) * 24.0;
         }
 
-        // Encourager le refroidissement (V1/V2) si la main est chargée de Heat
         if (heatInHand >= 2 && g == 1) score += 7.5;
         if (heatInHand >= 1 && g == 2) score += 3.0;
 
-        // Encourager de purger les Stress sur les lignes droites
         if (nextCorner.spacesBeforeCorner >= 7 && stressCount > 0) {
           score += stressCount * 2.2;
         }
 
-        // Légère variation pour des courses vivantes
         score += random.nextDouble() * 0.9;
 
         if (score > bestScore) {
@@ -210,16 +237,13 @@ class ShadowBot {
       }
     }
 
-    // Appliquer le changement de vitesse choisi (Étape 1)
     final shiftCost = (bestGear - _gear).abs() == 2 ? 1 : 0;
     if (shiftCost > 0) {
       _payHeat(shiftCost);
     }
     _gear = bestGear;
 
-    // Jouer les cartes choisies face cachée dans _playArea (Étape 2)
     if (bestCards == null) {
-      // Main encombrée (p. 7)
       _plannedCluttered = true;
       final chosen = <HeatCard>[...playable];
       final heats = _hand.where((c) => c.isHeat).take(_gear - chosen.length);
@@ -236,25 +260,49 @@ class ShadowBot {
     }
   }
 
-  /// Étapes 3 à 9 du tour du bot dans l'ordre de la course.
-  /// Retourne une description courte et sans spoiler de sa main pour le journal.
-  String resolveTurn({
+  /// Étapes 3 à 9 du tour du bot dans l'ordre réel de la course.
+  /// Retourne le chemin case par case pour animer visuellement la voiture.
+  BotTurnOutcome resolveTurn({
     required bool hasAdrenaline,
     required int totalLaps,
     required List<HeatCard> sharedStressReserve,
     required bool Function(int currentProgress) hasSlipstreamTarget,
-    required void Function(ShadowBot bot, int desiredProgress) placeBotAt,
+    required ({int progress, int lane}) Function(String botId, int desired)
+        findOpenSpot,
   }) {
-    if (finished) return '';
+    final startProg = progress;
+    final path = <int>[];
     final finishProgress = totalLaps * DeutschlandTrack.totalSpaces;
 
-    // Cas Main encombrée (p. 7)
+    void appendStepsTo(int from, int to) {
+      if (to > from) {
+        for (var p = from + 1; p <= to; p++) {
+          path.add(p);
+        }
+      } else if (to < from) {
+        path.add(to);
+      }
+    }
+
     if (_plannedCluttered) {
       _gear = 1;
       _discardPile.addAll(_playArea);
       _playArea.clear();
       _drawUpToSeven();
-      return '$name : main encombrée → reste sur place, boîte remise en V1.';
+      return BotTurnOutcome(
+        botId: id,
+        botName: name,
+        botColor: color,
+        startProgress: startProg,
+        finalProgress: progress,
+        finalLane: lane,
+        pathProgresses: const [],
+        speed: 0,
+        gear: _gear,
+        usedSlipstream: false,
+        spunOut: false,
+        summary: '$name : main encombrée → reste sur place, boîte remise en V1.',
+      );
     }
 
     // Étape 3 : Révéler & résoudre Stress (+)
@@ -271,7 +319,13 @@ class ShadowBot {
       }
     }
 
-    placeBotAt(this, progress + speed);
+    var simProgress = startProg;
+    var simLane = lane;
+
+    final moved = findOpenSpot(id, simProgress + speed);
+    appendStepsTo(simProgress, moved.progress);
+    simProgress = moved.progress;
+    simLane = moved.lane;
 
     // Étapes 4 & 5 : Réagir (Cooldown, Adrénaline +1, Boost)
     final maxCooldown =
@@ -285,7 +339,7 @@ class ShadowBot {
     }
 
     if (hasAdrenaline) {
-      final nextProgress = progress + 1;
+      final nextProgress = simProgress + 1;
       final testCorners = DeutschlandTrack.crossedCorners(
         fromProgress: _roundStartProgress,
         toProgress: nextProgress,
@@ -297,13 +351,15 @@ class ShadowBot {
       );
       if (reqHeat <= _engineHeat.length) {
         speed += 1;
-        placeBotAt(this, nextProgress);
+        final adrPos = findOpenSpot(id, nextProgress);
+        appendStepsTo(simProgress, adrPos.progress);
+        simProgress = adrPos.progress;
+        simLane = adrPos.lane;
       }
     }
 
-    // Boost optionnel sur ligne droite dégagée si le bot a assez de Heat
     final infoAfterMove = DeutschlandTrack.nextCornerInfo(
-      progress: progress,
+      progress: simProgress,
       totalLaps: totalLaps,
     );
     if (_engineHeat.length >= 3 &&
@@ -315,16 +371,19 @@ class ShadowBot {
         _playArea.add(boostCard);
         final add = boostCard.speedValue ?? 0;
         speed += add;
-        placeBotAt(this, progress + add);
+        final boostPos = findOpenSpot(id, simProgress + add);
+        appendStepsTo(simProgress, boostPos.progress);
+        simProgress = boostPos.progress;
+        simLane = boostPos.lane;
       }
     }
 
-    // Étape 6 : Aspiration (+2 cases sans augmenter la vitesse en virage)
+    // Étape 6 : Aspiration
     var usedSlipstream = false;
-    if (progress + 2 < finishProgress && hasSlipstreamTarget(progress)) {
+    if (simProgress + 2 < finishProgress && hasSlipstreamTarget(simProgress)) {
       final slipCorners = DeutschlandTrack.crossedCorners(
         fromProgress: _roundStartProgress,
-        toProgress: progress + 2,
+        toProgress: simProgress + 2,
         totalLaps: totalLaps,
       );
       final reqHeat = slipCorners.fold<int>(
@@ -332,7 +391,10 @@ class ShadowBot {
         (sum, e) => sum + max(0, speed - e.corner.speedLimit),
       );
       if (reqHeat <= _engineHeat.length) {
-        placeBotAt(this, progress + 2);
+        final slipPos = findOpenSpot(id, simProgress + 2);
+        appendStepsTo(simProgress, slipPos.progress);
+        simProgress = slipPos.progress;
+        simLane = slipPos.lane;
         usedSlipstream = true;
       }
     }
@@ -340,7 +402,7 @@ class ShadowBot {
     // Étape 7 : Vérifier les virages franchis
     final crossed = DeutschlandTrack.crossedCorners(
       fromProgress: _roundStartProgress,
-      toProgress: progress,
+      toProgress: simProgress,
       totalLaps: totalLaps,
     );
     var totalHeatPaidCorners = 0;
@@ -352,7 +414,6 @@ class ShadowBot {
         _payHeat(excess);
         totalHeatPaidCorners += excess;
       } else {
-        // Tête-à-queue réel !
         final paid = _engineHeat.length;
         if (paid > 0) _payHeat(paid);
         final stressPenalty = _gear <= 2 ? 1 : 2;
@@ -361,16 +422,19 @@ class ShadowBot {
             _hand.add(sharedStressReserve.removeLast());
           }
         }
-        placeBotAt(this, event.spaceBeforeCornerProgress);
+        final spinPos = findOpenSpot(id, event.spaceBeforeCornerProgress);
+        appendStepsTo(simProgress, spinPos.progress);
+        simProgress = spinPos.progress;
+        simLane = spinPos.lane;
         _gear = 1;
         spinOutCorner = event.corner;
         break;
       }
     }
 
-    // Étape 8 : Défausse intelligente (jamais Stress ni Heat)
+    // Étape 8 : Défausse (jamais Stress ni Heat)
     final upcoming = DeutschlandTrack.nextCornerInfo(
-      progress: progress,
+      progress: simProgress,
       totalLaps: totalLaps,
     );
     final toDiscard = <HeatCard>[];
@@ -397,8 +461,7 @@ class ShadowBot {
     _playArea.clear();
     _drawUpToSeven();
 
-    // Construction du résumé pour le journal (mode shadow)
-    final spaceNum = DeutschlandTrack.spaceForProgress(progress).spaceNumber;
+    final spaceNum = DeutschlandTrack.spaceForProgress(simProgress).spaceNumber;
     final notes = <String>[];
     if (usedSlipstream) notes.add('aspiration +2');
     if (spinOutCorner != null) {
@@ -406,12 +469,27 @@ class ShadowBot {
     } else if (totalHeatPaidCorners > 0) {
       notes.add('virage franchi');
     }
-    if (progress >= finishProgress) {
+    if (simProgress >= finishProgress) {
       notes.add('LIGNE D\'ARRIVÉE FRANCHIE !');
     }
 
     final extra = notes.isEmpty ? '' : ' (${notes.join(', ')})';
-    return '$name (V$_gear) : vitesse $speed → case $spaceNum$extra.';
+    final summary = '$name (V$_gear) : vitesse $speed → case $spaceNum$extra.';
+
+    return BotTurnOutcome(
+      botId: id,
+      botName: name,
+      botColor: color,
+      startProgress: startProg,
+      finalProgress: simProgress,
+      finalLane: simLane,
+      pathProgresses: path,
+      speed: speed,
+      gear: _gear,
+      usedSlipstream: usedSlipstream,
+      spunOut: spinOutCorner != null,
+      summary: summary,
+    );
   }
 
   HeatCard? _flipUntilBasicCard() {

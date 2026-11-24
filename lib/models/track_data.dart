@@ -89,15 +89,17 @@ class TrackSpace {
   /// Limite de vitesse du prochain virage.
   final int nextCornerSpeedLimit;
 
-  /// Position décalée sur la voie intérieure (lane 0) ou extérieure (lane 1)
-  /// pour permettre à 2 voitures de tenir côte à côte dans la même case.
-  Offset positionForLane(int lane) {
-    // Normale perpendiculaire à l'angle de déplacement dans l'espace visuel
+  /// Position centrée sur la case :
+  /// - Si la voiture est seule sur la case (`isSharedSpace == false`), elle est
+  ///   placée exactement au centre géométrique de la case (`position`).
+  /// - Si 2 voitures partagent la case, elles se répartissent proprement au
+  ///   centre de chaque demi-voie (corde / extérieur).
+  Offset positionForLane(int lane, {bool isSharedSpace = false}) {
+    if (!isSharedSpace) return position;
     final nx = -math.sin(angle);
     final ny = math.cos(angle);
-    // lane 0 = corde (droite du sens horaire), lane 1 = extérieur (gauche)
     final sign = lane == 0 ? 1.0 : -1.0;
-    const visualOffset = 0.0145;
+    const visualOffset = 0.0105;
     return Offset(
       position.dx + (nx * visualOffset * sign) / DeutschlandTrack.imageAspectRatio,
       position.dy + (ny * visualOffset * sign),
@@ -266,18 +268,20 @@ class DeutschlandTrack {
   }
 
   static const List<_TrackSegmentSpec> _segments = [
+    // Segment 0 : Ligne d'arrivée -> Virage 1 (5) : 11 cases (10..0)
     _TrackSegmentSpec(
       spaceCount: 11,
       nextCornerSpeedLimit: 5,
       countdownEnd: 0,
       points: [
-        Offset(0.457, 0.473),
-        Offset(0.325, 0.480),
-        Offset(0.210, 0.462),
-        Offset(0.112, 0.370),
+        Offset(0.457, 0.470),
+        Offset(0.325, 0.479),
+        Offset(0.210, 0.460),
+        Offset(0.112, 0.368),
         Offset(0.078, 0.235),
       ],
     ),
+    // Segment 1 : Virage 1 (5) -> Virage 2 (2) : 12 cases (11..0)
     _TrackSegmentSpec(
       spaceCount: 12,
       nextCornerSpeedLimit: 2,
@@ -291,6 +295,7 @@ class DeutschlandTrack {
         Offset(0.526, 0.185),
       ],
     ),
+    // Segment 2 : Virage 2 (2) -> Virage 3 (2) : 1 case (0)
     _TrackSegmentSpec(
       spaceCount: 1,
       nextCornerSpeedLimit: 2,
@@ -300,6 +305,7 @@ class DeutschlandTrack {
         Offset(0.578, 0.180),
       ],
     ),
+    // Segment 3 : Virage 3 (2) -> Virage 4 (6) : 13 cases (12..0)
     _TrackSegmentSpec(
       spaceCount: 13,
       nextCornerSpeedLimit: 6,
@@ -308,12 +314,13 @@ class DeutschlandTrack {
         Offset(0.578, 0.180),
         Offset(0.670, 0.270),
         Offset(0.780, 0.390),
-        Offset(0.842, 0.495),
-        Offset(0.876, 0.625),
-        Offset(0.885, 0.760),
+        Offset(0.840, 0.495),
+        Offset(0.870, 0.625),
+        Offset(0.882, 0.755),
         Offset(0.870, 0.835),
       ],
     ),
+    // Segment 4 : Virage 4 (6) -> Virage 5 (4) : 8 cases (7..0)
     _TrackSegmentSpec(
       spaceCount: 8,
       nextCornerSpeedLimit: 4,
@@ -321,11 +328,12 @@ class DeutschlandTrack {
       points: [
         Offset(0.870, 0.835),
         Offset(0.818, 0.885),
-        Offset(0.680, 0.905),
-        Offset(0.562, 0.895),
+        Offset(0.680, 0.903),
+        Offset(0.562, 0.893),
         Offset(0.520, 0.840),
       ],
     ),
+    // Segment 5 : Virage 5 (4) -> Virage 6 (4) : 7 cases (6..0)
     _TrackSegmentSpec(
       spaceCount: 7,
       nextCornerSpeedLimit: 4,
@@ -334,22 +342,23 @@ class DeutschlandTrack {
         Offset(0.520, 0.840),
         Offset(0.515, 0.765),
         Offset(0.560, 0.708),
-        Offset(0.660, 0.728),
-        Offset(0.752, 0.750),
-        Offset(0.790, 0.705),
+        Offset(0.655, 0.728),
+        Offset(0.745, 0.742),
+        Offset(0.790, 0.700),
       ],
     ),
+    // Segment 6 : Virage 6 (4) -> Ligne d'arrivée : 10 cases (20..11)
     _TrackSegmentSpec(
       spaceCount: 10,
       nextCornerSpeedLimit: 5,
       countdownEnd: 11,
       points: [
-        Offset(0.790, 0.705),
-        Offset(0.800, 0.625),
-        Offset(0.730, 0.542),
-        Offset(0.610, 0.502),
-        Offset(0.530, 0.476),
-        Offset(0.457, 0.473),
+        Offset(0.790, 0.700),
+        Offset(0.805, 0.618),
+        Offset(0.768, 0.548),
+        Offset(0.685, 0.495),
+        Offset(0.585, 0.468),
+        Offset(0.457, 0.470),
       ],
     ),
   ];

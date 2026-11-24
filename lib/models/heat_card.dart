@@ -69,13 +69,14 @@ class HeatCard {
   }
 }
 
-/// Construit le paquet de départ officiel (règles p. 3 & 7) pour le circuit
-/// Deutschland (3 Stress) :
-/// - 12 cartes Basic : 3x1, 3x2, 3x3, 3x4
-/// - 3 cartes Amélioration de départ : 0, 5 et 1 carte Heat dans le deck
-/// - 3 cartes Stress
-/// Total : 18 cartes dans la pioche initiale.
-List<HeatCard> createDeutschlandStarterDeck() {
+/// Construit le paquet de départ pour le circuit Deutschland (3 Stress) :
+/// - Mode Compétition (`includeStartingUpgrades: false`, par défaut) :
+///   12 cartes Basic (3x1, 3x2, 3x3, 3x4) + 3 Stress = 15 cartes.
+/// - Mode Initiation (`includeStartingUpgrades: true`) :
+///   ajoute les 3 cartes Amélioration de départ (0, 5 et +1 Heat) = 18 cartes.
+List<HeatCard> createDeutschlandStarterDeck({
+  bool includeStartingUpgrades = false,
+}) {
   final cards = <HeatCard>[];
   var index = 0;
 
@@ -91,32 +92,32 @@ List<HeatCard> createDeutschlandStarterDeck() {
     }
   }
 
-  // 3 cartes Amélioration de départ (0, 5, et 1 Heat supplémentaire dans le deck)
-  cards.add(
-    HeatCard(
-      id: 'upgrade_0_${index++}',
-      type: HeatCardType.upgradeSpeed,
-      speedValue: 0,
-      isStartingUpgrade: true,
-    ),
-  );
-  cards.add(
-    HeatCard(
-      id: 'upgrade_5_${index++}',
-      type: HeatCardType.upgradeSpeed,
-      speedValue: 5,
-      isStartingUpgrade: true,
-    ),
-  );
-  cards.add(
-    HeatCard(
-      id: 'upgrade_heat_${index++}',
-      type: HeatCardType.heat,
-      isStartingUpgrade: true,
-    ),
-  );
+  if (includeStartingUpgrades) {
+    cards.add(
+      HeatCard(
+        id: 'upgrade_0_${index++}',
+        type: HeatCardType.upgradeSpeed,
+        speedValue: 0,
+        isStartingUpgrade: true,
+      ),
+    );
+    cards.add(
+      HeatCard(
+        id: 'upgrade_5_${index++}',
+        type: HeatCardType.upgradeSpeed,
+        speedValue: 5,
+        isStartingUpgrade: true,
+      ),
+    );
+    cards.add(
+      HeatCard(
+        id: 'upgrade_heat_${index++}',
+        type: HeatCardType.heat,
+        isStartingUpgrade: true,
+      ),
+    );
+  }
 
-  // 3 cartes Stress indiquées sur le plateau Deutschland
   for (var copy = 0; copy < 3; copy++) {
     cards.add(
       HeatCard(

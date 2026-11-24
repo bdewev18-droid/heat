@@ -17,9 +17,11 @@ class GameScreen extends StatefulWidget {
   const GameScreen({
     super.key,
     this.totalLaps = DeutschlandTrack.defaultLaps,
+    this.includeStartingUpgrades = false,
   });
 
   final int totalLaps;
+  final bool includeStartingUpgrades;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -33,7 +35,10 @@ class _GameScreenState extends State<GameScreen> {
   @override
   void initState() {
     super.initState();
-    _controller = HeatGameController(totalLaps: widget.totalLaps);
+    _controller = HeatGameController(
+      totalLaps: widget.totalLaps,
+      includeStartingUpgrades: widget.includeStartingUpgrades,
+    );
   }
 
   @override
@@ -168,12 +173,20 @@ class _GameScreenState extends State<GameScreen> {
               body: LayoutBuilder(
                 builder: (context, constraints) {
                   final isWide = constraints.maxWidth >= 980;
+                  final activeDriverId = _controller.activeTurnIndex >= 0 &&
+                          _controller.activeTurnIndex <
+                              _controller.turnOrderQueue.length
+                      ? _controller
+                          .turnOrderQueue[_controller.activeTurnIndex].racerId
+                      : null;
+
                   final board = TrackBoard(
                     racers: _controller.standings,
                     playerProgress: _controller.carProgress,
                     nextCornerInfo: _controller.nextCornerInfo,
                     pendingStepsToMove: _controller.pendingStepsToMove,
                     showSpaceMarkers: _showSpaceMarkers,
+                    activeRacerId: activeDriverId,
                     onStepForwardTapped: _controller.stepCarForward,
                     onBoardTouchChanged: (touching) {
                       if (_isTouchingBoard != touching) {

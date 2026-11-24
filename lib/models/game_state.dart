@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 
@@ -6,11 +7,12 @@ import 'heat_card.dart';
 import 'shadow_bot.dart';
 import 'track_data.dart';
 
-/// Étapes officielles d'un tour (livret p. 4–6) + jet de dés initial + arrivée.
+/// Étapes officielles d'un tour (livret p. 4–6) + jet de dés + tour d'un bot.
 enum RoundStep {
   diceRoll(0, 'Jet de dés', true),
   shiftGears(1, 'Changer de vitesse', true),
   playCards(2, 'Jouer des cartes', true),
+  botTurn(3, 'Tour adverse', true),
   revealAndMove(3, 'Révéler & Avancer', true),
   adrenaline(4, 'Adrénaline', false),
   react(5, 'Réagir', false),
@@ -25,6 +27,21 @@ enum RoundStep {
   final int number;
   final String label;
   final bool isMandatory;
+}
+
+/// Entrée dans la file d'ordre de passage de la manche (du 1er au dernier).
+class TurnOrderEntry {
+  const TurnOrderEntry({
+    required this.racerId,
+    required this.name,
+    required this.color,
+    required this.isHuman,
+  });
+
+  final String racerId;
+  final String name;
+  final Color color;
+  final bool isHuman;
 }
 
 /// Résultat d'évaluation d'un virage franchi pendant le tour.
@@ -46,19 +63,27 @@ class CornerCheckResult {
   final int stressTaken;
 }
 
-/// Moteur complet des règles de base de Heat (circuit Deutschland) avec
-/// 2 adversaires en mode Shadow (sans triche) et jet de dés de départ.
+/// Moteur complet des règles de base de Heat (circuit Deutschland) avec :
+/// - Mode Compétition (sans 0/5 par défaut) ou Initiation (avec 0/5/+1 Heat)
+/// - 2 Bots Shadow sans triche avec suivi visuel tour par tour (1er devant commence)
+/// - Jet de dés de départ & notifications explicites des cartes Heat / Moteur
 class HeatGameController extends ChangeNotifier {
   HeatGameController({
     int totalLaps = DeutschlandTrack.defaultLaps,
+    bool includeStartingUpgrades = false,
     Random? random,
   })  : _totalLaps = totalLaps,
+        _includeStartingUpgrades = includeStartingUpgrades,
         _random = random ?? Random() {
-    resetRace(totalLaps: totalLaps);
+    resetRace(
+      totalLaps: totalLaps,
+      includeStartingUpgrades: includeStartingUpgrades,
+    );
   }
 
   final Random _random;
   int _totalLaps;
+  bool _includeStartingUpgrades;
 
   // État piste & voiture du joueur
   int _roundNumber = 1;
@@ -80,8 +105,18 @@ class HeatGameController extends ChangeNotifier {
   int _roundStartGear = 1;
   int _selectedTargetGear = 1;
 
-  // Étape en cours
+  // Étape en cours & ordre de passage de la manche
   RoundStep _step = RoundStep.diceRoll;
+  List<TurnOrderEntry> _turnOrderQueue = [];
+  int _activeTurnIndex = -1;
+  bool _playerClutteredThisRound = false;
+
+  // Animation pas à pas du bot actif
+  Timer? _botAnimTimer;
+  BotTurnOutcome? _activeBotOutcome;
+  int _botAnimStepIdx = 0;
+  bool _isBotAnimating = false;
+
   bool _adrenalineEligible = false;
   bool _adrenalineEnabled = false;
   bool _adrenalineSpeedUsed = false;
@@ -91,6 +126,10 @@ class HeatGameController extends ChangeNotifier {
   bool _cornersResolved = false;
   List<CornerCheckResult> _lastCornerResults = const [];
 
+  // Notification explicite pour les mouvements de cartes Heat / Moteur
+  String? _lastHeatNotice;
+  bool _lastHeatNoticeIsCooldown = false;
+
   // Cartes du joueur
   List<HeatCard> _drawPile = [];
   List<HeatCard> _hand = [];
@@ -99,19 +138,22 @@ class HeatGameController extends ChangeNotifier {
   List<HeatCard> _engineHeat = [];
   List<HeatCard> _stressReserve = [];
 
-  // 2 adversaires en mode Shadow (vrais paquets, aucune triche)
+  // 2 adversaires en mode Shadow
   late List<ShadowBot> _bots;
-  List<ShadowBot> _botsPendingAfterPlayer = [];
   String? _lastCarIdThisRound;
 
-  // Sélections UI (Step 2 et Step 8)
   final Set<String> _selectedCardIds = {};
-
-  // Journal de course
   final List<String> _eventLog = [];
+
+  @override
+  void dispose() {
+    _botAnimTimer?.cancel();
+    super.dispose();
+  }
 
   // Getters publics
   int get totalLaps => _totalLaps;
+  bool get includeStartingUpgrades => _includeStartingUpgrades;
   int get finishProgress => _totalLaps * DeutschlandTrack.totalSpaces;
   int get roundNumber => _roundNumber;
   int get carProgress => _carProgress;
@@ -125,6 +167,12 @@ class HeatGameController extends ChangeNotifier {
   int get roundStartGear => _roundStartGear;
   int get selectedTargetGear => _selectedTargetGear;
   RoundStep get step => _step;
+
+  List<TurnOrderEntry> get turnOrderQueue => List.unmodifiable(_turnOrderQueue);
+  int get activeTurnIndex => _activeTurnIndex;
+  BotTurnOutcome? get activeBotOutcome => _activeBotOutcome;
+  bool get isBotAnimating => _isBotAnimating;
+
   bool get adrenalineEligible => _adrenalineEligible;
   bool get adrenalineEnabled => _adrenalineEnabled;
   bool get adrenalineSpeedUsed => _adrenalineSpeedUsed;
@@ -133,6 +181,9 @@ class HeatGameController extends ChangeNotifier {
   bool get cornersResolved => _cornersResolved;
   List<CornerCheckResult> get lastCornerResults =>
       List.unmodifiable(_lastCornerResults);
+
+  String? get lastHeatNotice => _lastHeatNotice;
+  bool get lastHeatNoticeIsCooldown => _lastHeatNoticeIsCooldown;
 
   List<HeatCard> get drawPile => List.unmodifiable(_drawPile);
   List<HeatCard> get hand => List.unmodifiable(_hand);
@@ -148,13 +199,20 @@ class HeatGameController extends ChangeNotifier {
   bool get hasCrossedFinishLine => _carProgress >= finishProgress;
   int? get playerFinishRank => _playerFinishRank;
 
-  /// Calcul dynamique des repères entre la voiture du joueur et le prochain virage.
+  int get heatCardsInHandCount => _hand.where((c) => c.isHeat).length;
+
+  /// Vrai si le joueur a des cartes Heat en main qu'il peut refroidir maintenant.
+  bool get canCooldownNow =>
+      _step == RoundStep.react &&
+      remainingCooldowns > 0 &&
+      heatCardsInHandCount > 0;
+
   NextCornerInfo get nextCornerInfo => DeutschlandTrack.nextCornerInfo(
         progress: _carProgress,
         totalLaps: _totalLaps,
       );
 
-  /// Liste triée par classement de course (1er devant, corde départage les égalités).
+  /// Classement en direct (du 1er devant au dernier ; corde départage les égalités).
   List<RacerTrackState> get standings {
     final list = <RacerTrackState>[
       RacerTrackState(
@@ -186,7 +244,31 @@ class HeatGameController extends ChangeNotifier {
     return list;
   }
 
-  /// Nombre de Refroidissements (Cooldown) disponibles à l'étape 5.
+  /// Ordre d'affichage pour le suivi de la manche au-dessus des étapes.
+  List<TurnOrderEntry> get displayedTurnOrder {
+    if (_turnOrderQueue.isNotEmpty) return _turnOrderQueue;
+    return standings
+        .where((r) => !r.finished)
+        .map(
+          (r) => TurnOrderEntry(
+            racerId: r.id,
+            name: r.name,
+            color: r.color,
+            isHuman: r.isHuman,
+          ),
+        )
+        .toList();
+  }
+
+  /// Nom du prochain pilote dans la file (ou null si fin de manche).
+  TurnOrderEntry? get nextDriverInQueue {
+    final nextIdx = _activeTurnIndex + 1;
+    if (nextIdx >= 0 && nextIdx < _turnOrderQueue.length) {
+      return _turnOrderQueue[nextIdx];
+    }
+    return null;
+  }
+
   int get totalCooldownAvailable {
     var base = 0;
     if (_gear == 1) base = 3;
@@ -225,21 +307,24 @@ class HeatGameController extends ChangeNotifier {
     return false;
   }
 
-  /// Vrai si une voiture adverse est sur la même case ou 1 case devant le joueur.
-  bool get hasRealSlipstreamTarget => _hasSlipstreamTargetFor('player', _carProgress);
+  bool get hasRealSlipstreamTarget =>
+      _hasSlipstreamTargetFor('player', _carProgress);
 
   bool get canUseSlipstream {
     if (_step != RoundStep.slipstream || _slipstreamUsed) return false;
     if (_pendingStepsToMove > 0) return false;
     if (!hasRealSlipstreamTarget) return false;
-    // Règle p. 7 : interdit pour franchir ou après avoir franchi la ligne d'arrivée finale.
     if (_carProgress + 2 >= finishProgress) return false;
     return true;
   }
 
-  /// Réinitialise complètement une nouvelle course (avant jet de dés).
-  void resetRace({int? totalLaps}) {
+  void resetRace({int? totalLaps, bool? includeStartingUpgrades}) {
+    _botAnimTimer?.cancel();
     if (totalLaps != null) _totalLaps = totalLaps;
+    if (includeStartingUpgrades != null) {
+      _includeStartingUpgrades = includeStartingUpgrades;
+    }
+
     _roundNumber = 1;
     _carProgress = 0;
     _carLane = 0;
@@ -258,6 +343,12 @@ class HeatGameController extends ChangeNotifier {
     _roundStartGear = 1;
     _selectedTargetGear = 1;
     _step = RoundStep.diceRoll;
+    _turnOrderQueue = [];
+    _activeTurnIndex = -1;
+    _playerClutteredThisRound = false;
+    _activeBotOutcome = null;
+    _botAnimStepIdx = 0;
+    _isBotAnimating = false;
 
     _adrenalineEligible = false;
     _adrenalineEnabled = false;
@@ -267,11 +358,14 @@ class HeatGameController extends ChangeNotifier {
     _cooldownsUsed = 0;
     _cornersResolved = false;
     _lastCornerResults = const [];
+    _lastHeatNotice = null;
+    _lastHeatNoticeIsCooldown = false;
     _selectedCardIds.clear();
-    _botsPendingAfterPlayer = [];
     _lastCarIdThisRound = null;
 
-    _drawPile = createDeutschlandStarterDeck()..shuffle(_random);
+    _drawPile = createDeutschlandStarterDeck(
+      includeStartingUpgrades: _includeStartingUpgrades,
+    )..shuffle(_random);
     _engineHeat = createDeutschlandEngineHeat();
     _stressReserve = createStressReserve();
     _hand = [];
@@ -286,6 +380,7 @@ class HeatGameController extends ChangeNotifier {
         color: const Color(0xFF1565C0),
         aggressiveness: 0.65,
         random: _random,
+        includeStartingUpgrades: _includeStartingUpgrades,
       ),
       ShadowBot(
         id: 'bot_green',
@@ -293,39 +388,40 @@ class HeatGameController extends ChangeNotifier {
         color: const Color(0xFF2E7D32),
         aggressiveness: 0.40,
         random: _random,
+        includeStartingUpgrades: _includeStartingUpgrades,
       ),
     ];
 
     _drawUpToSeven();
+    final modeLabel = _includeStartingUpgrades
+        ? 'Avec cartes 0/5 (+1 Heat)'
+        : 'Mode Compétition (sans 0/5)';
     _log(
-      'Prêt au départ sur Deutschland ($_totalLaps tours, 3 pilotes) : '
-      'lance les dés pour déterminer la grille de départ !',
+      'Prêt au départ sur Deutschland ($_totalLaps tours • $modeLabel) : '
+      'lance les dés pour la grille !',
     );
     notifyListeners();
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 0 : Jet de dés pour la grille de départ
+  // ÉTAPE 0 : Jet de dés
   // ---------------------------------------------------------------------------
 
   void rollStartingDice() {
     if (_step != RoundStep.diceRoll) return;
 
-    // Tirage de dés 1..6 distincts pour un départage clair et équitable
     final faces = [1, 2, 3, 4, 5, 6]..shuffle(_random);
     _playerDiceRoll = faces[0];
     _bots[0].diceRoll = faces[1];
     _bots[1].diceRoll = faces[2];
     _diceRolled = true;
 
-    // Tri décroissant pour attribuer Pole Position (1), P2 et P3 sur la grille
     final entries = <({String id, String name, int roll})>[
       (id: 'player', name: 'Toi (Rouge)', roll: _playerDiceRoll),
       (id: _bots[0].id, name: _bots[0].name, roll: _bots[0].diceRoll),
       (id: _bots[1].id, name: _bots[1].name, roll: _bots[1].diceRoll),
     ]..sort((a, b) => b.roll.compareTo(a.roll));
 
-    // Grille : P1 = (0, lane 0), P2 = (0, lane 1), P3 = (-1, lane 0)
     const gridSlots = [
       (progress: 0, lane: 0),
       (progress: 0, lane: 1),
@@ -359,7 +455,7 @@ class HeatGameController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 1 : Changer de vitesse (Shift Gears)
+  // ÉTAPE 1 : Changer de vitesse
   // ---------------------------------------------------------------------------
 
   void selectTargetGear(int targetGear) {
@@ -374,12 +470,9 @@ class HeatGameController extends ChangeNotifier {
     final cost = shiftHeatCost(_selectedTargetGear);
     if (cost > _engineHeat.length) return;
 
+    _lastHeatNotice = null;
     if (cost > 0) {
-      _payHeat(cost);
-      _log(
-        'Étape 1 : Vitesse $_roundStartGear → $_selectedTargetGear '
-        '(±2 rapports : 1 Heat payé).',
-      );
+      _payHeat(cost, reason: 'Changement de vitesse ±2 ($_roundStartGear → $_selectedTargetGear)');
     } else if (_selectedTargetGear != _roundStartGear) {
       _log('Étape 1 : Vitesse $_roundStartGear → $_selectedTargetGear.');
     } else {
@@ -393,7 +486,7 @@ class HeatGameController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 2 : Jouer des cartes (Play Cards — simultané avec les 2 bots)
+  // ÉTAPE 2 : Jouer des cartes (simultané) → lancement de l'ordre de passage
   // ---------------------------------------------------------------------------
 
   bool canToggleCardInHand(HeatCard card) {
@@ -458,63 +551,150 @@ class HeatGameController extends ChangeNotifier {
   void confirmPlayCards() {
     if (!canConfirmPlayCards) return;
 
-    // 1. Les 2 bots choisissent simultanément leur vitesse et leurs cartes réelles
+    // 1. Les 2 bots planifient simultanément leurs vraies cartes (mode shadow)
     for (final bot in _bots) {
       if (!bot.finished) {
         bot.planTurn(totalLaps: _totalLaps);
       }
     }
 
-    // 2. Déterminer l'ordre de résolution du tour (du 1er au dernier non arrivé)
-    final activeOrder = standings.where((r) => !r.finished).toList();
-    _lastCarIdThisRound = activeOrder.isNotEmpty ? activeOrder.last.id : null;
-    _adrenalineEligible = _lastCarIdThisRound == 'player';
-
-    final playerIdxInOrder = activeOrder.indexWhere((r) => r.isHuman);
-    final botsBeforePlayer = <ShadowBot>[];
-    _botsPendingAfterPlayer = <ShadowBot>[];
-
-    for (var i = 0; i < activeOrder.length; i++) {
-      final racer = activeOrder[i];
-      if (racer.isHuman) continue;
-      final bot = _bots.firstWhere((b) => b.id == racer.id);
-      if (i < playerIdxInOrder) {
-        botsBeforePlayer.add(bot);
-      } else {
-        _botsPendingAfterPlayer.add(bot);
-      }
-    }
-
-    // 3. Les bots devant le joueur résolvent d'abord leur tour (règle p. 4)
-    for (final bot in botsBeforePlayer) {
-      _runShadowBotResolution(bot);
-    }
-
-    // 4. Jouer les cartes du joueur
+    // 2. Jouer les cartes du joueur face cachée dans _playArea
     final chosen = _hand.where((c) => _selectedCardIds.contains(c.id)).toList();
     _hand.removeWhere((c) => _selectedCardIds.contains(c.id));
     _playArea.addAll(chosen);
     _selectedCardIds.clear();
+    _playerClutteredThisRound = chosen.any((c) => c.isHeat);
 
-    if (chosen.any((c) => c.isHeat)) {
-      _log(
-        'Main encombrée (p. 7) : tu ne avances pas ce tour, boîte remise en V1.',
-      );
-      _gear = 1;
-      _discardPile.addAll(_playArea);
-      _playArea.clear();
-      _step = RoundStep.replenishHand;
+    // 3. Figer l'ordre de résolution : TOUJOURS le pilote devant qui commence !
+    final activeOrder = standings.where((r) => !r.finished).toList();
+    _lastCarIdThisRound = activeOrder.isNotEmpty ? activeOrder.last.id : null;
+    _adrenalineEligible = _lastCarIdThisRound == 'player';
+
+    _turnOrderQueue = activeOrder
+        .map(
+          (r) => TurnOrderEntry(
+            racerId: r.id,
+            name: r.name,
+            color: r.color,
+            isHuman: r.isHuman,
+          ),
+        )
+        .toList();
+    _activeTurnIndex = 0;
+
+    _beginTurnForCurrentQueueIndex();
+  }
+
+  /// Lance le tour (Étapes 3–9) du pilote actif dans `_turnOrderQueue`.
+  void _beginTurnForCurrentQueueIndex() {
+    _botAnimTimer?.cancel();
+    _isBotAnimating = false;
+    _activeBotOutcome = null;
+
+    if (_activeTurnIndex < 0 || _activeTurnIndex >= _turnOrderQueue.length) {
+      _finishCurrentRound();
+      return;
+    }
+
+    final current = _turnOrderQueue[_activeTurnIndex];
+    if (current.isHuman) {
+      if (_playerClutteredThisRound) {
+        _log(
+          'Main encombrée (p. 7) : tu n\'avances pas ce tour, boîte remise en V1.',
+        );
+        _gear = 1;
+        _discardPile.addAll(_playArea);
+        _playArea.clear();
+        _step = RoundStep.replenishHand;
+        notifyListeners();
+        return;
+      }
+
+      _step = RoundStep.revealAndMove;
+      _resolveRevealedCards();
+      notifyListeners();
+    } else {
+      final bot = _bots.firstWhere((b) => b.id == current.racerId);
+      _startVisibleBotTurn(bot);
+    }
+  }
+
+  /// Résout le tour d'un bot et anime sa voiture case par case sur le circuit !
+  void _startVisibleBotTurn(ShadowBot bot) {
+    final hasAdrenaline = _lastCarIdThisRound == bot.id;
+    final outcome = bot.resolveTurn(
+      hasAdrenaline: hasAdrenaline,
+      totalLaps: _totalLaps,
+      sharedStressReserve: _stressReserve,
+      hasSlipstreamTarget: (p) => _hasSlipstreamTargetFor(bot.id, p),
+      findOpenSpot: (botId, desired) =>
+          _findOpenSpot(racerId: botId, desiredProgress: desired),
+    );
+
+    _step = RoundStep.botTurn;
+    _activeBotOutcome = outcome;
+    _botAnimStepIdx = 0;
+    _log(outcome.summary);
+
+    if (outcome.pathProgresses.isEmpty) {
+      bot.progress = outcome.finalProgress;
+      bot.lane = outcome.finalLane;
+      _isBotAnimating = false;
       notifyListeners();
       return;
     }
 
-    _step = RoundStep.revealAndMove;
-    _resolveRevealedCards();
+    _isBotAnimating = true;
+    // Premier pas immédiat pour que la voiture commence tout de suite à bouger
+    _applyBotAnimStep(bot, outcome);
     notifyListeners();
+
+    if (_isBotAnimating) {
+      _botAnimTimer = Timer.periodic(const Duration(milliseconds: 210), (t) {
+        _applyBotAnimStep(bot, outcome);
+        if (!_isBotAnimating) {
+          t.cancel();
+        }
+        notifyListeners();
+      });
+    }
+  }
+
+  void _applyBotAnimStep(ShadowBot bot, BotTurnOutcome outcome) {
+    if (_botAnimStepIdx < outcome.pathProgresses.length) {
+      bot.progress = outcome.pathProgresses[_botAnimStepIdx];
+      _botAnimStepIdx++;
+      if (_botAnimStepIdx >= outcome.pathProgresses.length) {
+        bot.progress = outcome.finalProgress;
+        bot.lane = outcome.finalLane;
+        _isBotAnimating = false;
+      } else {
+        bot.lane = _visualLaneFor(bot.id, bot.progress);
+      }
+    } else {
+      bot.progress = outcome.finalProgress;
+      bot.lane = outcome.finalLane;
+      _isBotAnimating = false;
+    }
+  }
+
+  /// Termine l'animation du bot actif (si en cours) et passe au pilote suivant !
+  void proceedAfterBotTurn() {
+    if (_step != RoundStep.botTurn) return;
+    _botAnimTimer?.cancel();
+    if (_activeBotOutcome != null) {
+      final bot = _bots.firstWhere((b) => b.id == _activeBotOutcome!.botId);
+      bot.progress = _activeBotOutcome!.finalProgress;
+      bot.lane = _activeBotOutcome!.finalLane;
+    }
+    _isBotAnimating = false;
+    _activeBotOutcome = null;
+    _activeTurnIndex++;
+    _beginTurnForCurrentQueueIndex();
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 3 : Révéler & Avancer (Reveal & Move)
+  // ÉTAPE 3 : Révéler & Avancer (Joueur)
   // ---------------------------------------------------------------------------
 
   void _resolveRevealedCards() {
@@ -542,8 +722,7 @@ class HeatGameController extends ChangeNotifier {
     _moveFloorProgress = _carProgress;
     _pendingStepsToMove = speed;
     _log(
-      'Étape 3 : ${revealedSummary.join(', ')} → Vitesse $_turnSpeed. '
-      'Avance ta voiture de $_turnSpeed cases.',
+      'À ton tour (Étape 3) : ${revealedSummary.join(', ')} → Vitesse $_turnSpeed.',
     );
   }
 
@@ -583,7 +762,7 @@ class HeatGameController extends ChangeNotifier {
     if (_pendingStepsToMove == 0) {
       _applyPlayerFinalPlacement();
     } else {
-      _updatePlayerVisualLane();
+      _carLane = _visualLaneFor('player', _carProgress);
     }
     notifyListeners();
   }
@@ -593,7 +772,7 @@ class HeatGameController extends ChangeNotifier {
     _carProgress--;
     _pendingStepsToMove++;
     if (_turnSpacesMoved > 0) _turnSpacesMoved--;
-    _updatePlayerVisualLane();
+    _carLane = _visualLaneFor('player', _carProgress);
     notifyListeners();
   }
 
@@ -606,7 +785,6 @@ class HeatGameController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Applique la règle de blocage (p. 5) et de voie libre quand un déplacement se termine.
   void _applyPlayerFinalPlacement() {
     final desired = _carProgress;
     final placed = _findOpenSpot(racerId: 'player', desiredProgress: desired);
@@ -614,17 +792,25 @@ class HeatGameController extends ChangeNotifier {
     _carLane = placed.lane;
     if (placed.progress < desired) {
       _log(
-        'Case bloquée par 2 voitures ! Tu es replacé sur la case libre derrière '
+        'Case bloquée par 2 voitures ! Replacé sur la case libre derrière '
         '(case ${currentSpace.spaceNumber}).',
       );
     }
   }
 
-  void _updatePlayerVisualLane() {
-    final occupiedLane0 = _bots.any(
-      (b) => !b.finished && b.progress == _carProgress && b.lane == 0,
-    );
-    _carLane = occupiedLane0 ? 1 : 0;
+  int _visualLaneFor(String racerId, int progress) {
+    final lane0Occupied = (racerId != 'player' &&
+            !_playerFinished &&
+            _carProgress == progress &&
+            _carLane == 0) ||
+        _bots.any(
+          (b) =>
+              b.id != racerId &&
+              !b.finished &&
+              b.progress == progress &&
+              b.lane == 0,
+        );
+    return lane0Occupied ? 1 : 0;
   }
 
   void proceedFromRevealAndMove() {
@@ -632,7 +818,6 @@ class HeatGameController extends ChangeNotifier {
     if (_adrenalineEligible) {
       _step = RoundStep.adrenaline;
     } else {
-      // Pas dernier → l'étape 4 ne s'applique pas, passage direct à l'étape 5
       _adrenalineEnabled = false;
       _step = RoundStep.react;
     }
@@ -640,24 +825,49 @@ class HeatGameController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 4 : Adrénaline (uniquement si dernier pilote du tour)
+  // ÉTAPE 4 : Adrénaline
   // ---------------------------------------------------------------------------
 
   void chooseAdrenaline({required bool activate}) {
     if (_step != RoundStep.adrenaline) return;
     _adrenalineEnabled = activate && _adrenalineEligible;
     if (_adrenalineEnabled) {
-      _log(
-        'Étape 4 : Adrénaline activée (+1 Vitesse/case et +1 Refroidissement disponibles).',
-      );
+      _log('Étape 4 : Adrénaline activée (+1 Vitesse/case et +1 Refroidissement).');
     }
     _step = RoundStep.react;
     notifyListeners();
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 5 : Réagir (Cooldown, Boost, Adrénaline +1)
+  // ÉTAPE 5 : Réagir (Refroidissement explicite, Boost, Adrénaline +1)
   // ---------------------------------------------------------------------------
+
+  void cooldownOneHeat() {
+    if (!canCooldownNow) return;
+    final card = _hand.firstWhere((c) => c.isHeat);
+    _cooldownHeatCard(card);
+  }
+
+  void cooldownAllPossibleHeat() {
+    if (!canCooldownNow) return;
+    var count = 0;
+    while (remainingCooldowns > 0) {
+      final idx = _hand.indexWhere((c) => c.isHeat);
+      if (idx == -1) break;
+      _engineHeat.add(_hand.removeAt(idx));
+      _cooldownsUsed++;
+      count++;
+    }
+    if (count > 0) {
+      _lastHeatNotice =
+          '❄️ $count carte(s) Heat renvoyée(s) : Main → Moteur (${_engineHeat.length} dans le moteur)';
+      _lastHeatNoticeIsCooldown = true;
+      _log(
+        'Étape 5 (Refroidissement) : $count Heat renvoyée(s) de la main vers le moteur.',
+      );
+      notifyListeners();
+    }
+  }
 
   void _cooldownHeatCard(HeatCard card) {
     if (_step != RoundStep.react || remainingCooldowns <= 0) return;
@@ -665,9 +875,11 @@ class HeatGameController extends ChangeNotifier {
     _hand.remove(card);
     _engineHeat.add(card);
     _cooldownsUsed++;
+    _lastHeatNotice =
+        '❄️ 1 Heat renvoyée : Main → Moteur (${_engineHeat.length} dans le moteur)';
+    _lastHeatNoticeIsCooldown = true;
     _log(
-      'Étape 5 (Refroidissement) : 1 Heat renvoyée au moteur '
-      '(restant : $remainingCooldowns).',
+      'Étape 5 (Refroidissement) : 1 Heat renvoyée au moteur (restant : $remainingCooldowns).',
     );
     notifyListeners();
   }
@@ -682,16 +894,14 @@ class HeatGameController extends ChangeNotifier {
     _turnSpeed += 1;
     _moveFloorProgress = _carProgress;
     _pendingStepsToMove += 1;
-    _log(
-      'Étape 5 (Adrénaline +1) : +1 Vitesse (total $_turnSpeed) et +1 case.',
-    );
+    _log('Étape 5 (Adrénaline +1) : +1 Vitesse (total $_turnSpeed) et +1 case.');
     notifyListeners();
   }
 
   void activateBoost() {
     if (_step != RoundStep.react || _boostUsed || _engineHeat.isEmpty) return;
     _boostUsed = true;
-    _payHeat(1);
+    _payHeat(1, reason: 'Boost');
     final card = _flipUntilBasicCard(reason: 'Boost (1 Heat)');
     if (card != null) {
       _playArea.add(card);
@@ -711,7 +921,7 @@ class HeatGameController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 6 : Aspiration (Slipstream — détectée sur les vraies positions des bots)
+  // ÉTAPE 6 : Aspiration
   // ---------------------------------------------------------------------------
 
   void activateSlipstream() {
@@ -719,9 +929,7 @@ class HeatGameController extends ChangeNotifier {
     _slipstreamUsed = true;
     _moveFloorProgress = _carProgress;
     _pendingStepsToMove += 2;
-    _log(
-      'Étape 6 (Aspiration) : +2 cases (n\'augmente PAS la vitesse en virage).',
-    );
+    _log('Étape 6 (Aspiration) : +2 cases (ne compte pas pour les virages).');
     notifyListeners();
   }
 
@@ -734,7 +942,7 @@ class HeatGameController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 7 : Vérifier les virages (Check Corner & Spin Out)
+  // ÉTAPE 7 : Vérifier les virages
   // ---------------------------------------------------------------------------
 
   void resolveCornersAndProceed() {
@@ -766,7 +974,7 @@ class HeatGameController extends ChangeNotifier {
               'Étape 7 : ${event.corner.name} (limite $limit) franchi à $_turnSpeed → OK !',
             );
           } else if (_engineHeat.length >= excess) {
-            _payHeat(excess);
+            _payHeat(excess, reason: event.corner.name);
             results.add(
               CornerCheckResult(
                 corner: event.corner,
@@ -777,13 +985,11 @@ class HeatGameController extends ChangeNotifier {
                 stressTaken: 0,
               ),
             );
-            _log(
-              'Étape 7 : ${event.corner.name} (limite $limit) à $_turnSpeed → '
-              '$excess Heat payé(s).',
-            );
           } else {
             final paid = _engineHeat.length;
-            if (paid > 0) _payHeat(paid);
+            if (paid > 0) {
+              _payHeat(paid, reason: 'Tête-à-queue (${event.corner.name})');
+            }
 
             final stressCount = _gear <= 2 ? 1 : 2;
             var actualStress = 0;
@@ -834,7 +1040,7 @@ class HeatGameController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 8 : Défausser (Discard)
+  // ÉTAPE 8 : Défausser
   // ---------------------------------------------------------------------------
 
   void confirmDiscard() {
@@ -853,7 +1059,7 @@ class HeatGameController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // ÉTAPE 9 : Compléter sa main + résolution des bots derrière le joueur
+  // ÉTAPE 9 : Compléter sa main → passe au pilote suivant dans la file !
   // ---------------------------------------------------------------------------
 
   void replenishAndStartNextRound() {
@@ -863,21 +1069,20 @@ class HeatGameController extends ChangeNotifier {
       _discardPile.addAll(_playArea);
       _playArea.clear();
     }
-
     _drawUpToSeven();
 
-    // Les bots derrière le joueur jouent leur tour (Étapes 3–9)
-    final remainingBots = List<ShadowBot>.from(_botsPendingAfterPlayer);
-    _botsPendingAfterPlayer.clear();
-    for (final bot in remainingBots) {
-      _runShadowBotResolution(bot);
-    }
+    // Passer au pilote suivant dans l'ordre de la manche (les bots derrière toi)
+    _activeTurnIndex++;
+    _beginTurnForCurrentQueueIndex();
+  }
 
-    // Attribuer les rangs d'arrivée à tous les pilotes ayant franchi la ligne ce tour
+  void _finishCurrentRound() {
     _assignFinishRanksForRound();
 
     if (_playerFinished) {
       _step = RoundStep.finished;
+      _turnOrderQueue = [];
+      _activeTurnIndex = -1;
       _log(
         'ARRIVÉE ! Tu termines ${_playerFinishRank}e sur Deutschland en $_roundNumber manches !',
       );
@@ -893,6 +1098,9 @@ class HeatGameController extends ChangeNotifier {
     _turnSpeed = 0;
     _roundStartGear = _gear;
     _selectedTargetGear = _gear;
+    _turnOrderQueue = [];
+    _activeTurnIndex = -1;
+    _playerClutteredThisRound = false;
     _adrenalineEligible = false;
     _adrenalineEnabled = false;
     _adrenalineSpeedUsed = false;
@@ -913,33 +1121,13 @@ class HeatGameController extends ChangeNotifier {
   }
 
   // ---------------------------------------------------------------------------
-  // Helpers Bots, Placement, Blocage & Classement
+  // Helpers
   // ---------------------------------------------------------------------------
 
-  void _runShadowBotResolution(ShadowBot bot) {
-    if (bot.finished) return;
-    final hasAdrenaline = _lastCarIdThisRound == bot.id;
-    final summary = bot.resolveTurn(
-      hasAdrenaline: hasAdrenaline,
-      totalLaps: _totalLaps,
-      sharedStressReserve: _stressReserve,
-      hasSlipstreamTarget: (p) => _hasSlipstreamTargetFor(bot.id, p),
-      placeBotAt: (b, desired) {
-        final placed = _findOpenSpot(racerId: b.id, desiredProgress: desired);
-        b.progress = placed.progress;
-        b.lane = placed.lane;
-      },
-    );
-    if (summary.isNotEmpty) {
-      _log(summary);
-    }
-  }
-
   bool _hasSlipstreamTargetFor(String racerId, int currentProgress) {
-    // Un pilote peut prendre l'aspiration s'il y a une autre voiture sur sa case
-    // ou 1 case devant lui (p. 6).
     if (racerId != 'player' && !_playerFinished) {
-      if (_carProgress == currentProgress || _carProgress == currentProgress + 1) {
+      if (_carProgress == currentProgress ||
+          _carProgress == currentProgress + 1) {
         return true;
       }
     }
@@ -953,8 +1141,6 @@ class HeatGameController extends ChangeNotifier {
     return false;
   }
 
-  /// Trouve la case libre la plus avancée <= `desiredProgress` (max 2 voitures/case)
-  /// et attribue la corde (lane 0) en priorité (règle p. 5).
   ({int progress, int lane}) _findOpenSpot({
     required String racerId,
     required int desiredProgress,
@@ -991,14 +1177,15 @@ class HeatGameController extends ChangeNotifier {
     }
     if (newlyFinished.isEmpty) return;
 
-    // Règle p. 7 : le plus loin après la ligne gagne, la corde départage les égalités
     newlyFinished.sort((a, b) {
       if (a.progress != b.progress) return b.progress.compareTo(a.progress);
       return a.lane.compareTo(b.lane);
     });
 
     var nextRank = 1;
-    if (_playerFinishRank != null) nextRank = max(nextRank, _playerFinishRank! + 1);
+    if (_playerFinishRank != null) {
+      nextRank = max(nextRank, _playerFinishRank! + 1);
+    }
     for (final bot in _bots) {
       if (bot.finishRank != null) nextRank = max(nextRank, bot.finishRank! + 1);
     }
@@ -1015,10 +1202,20 @@ class HeatGameController extends ChangeNotifier {
     }
   }
 
-  void _payHeat(int count) {
+  void _payHeat(int count, {required String reason}) {
+    var paid = 0;
     for (var i = 0; i < count; i++) {
       if (_engineHeat.isEmpty) break;
       _discardPile.add(_engineHeat.removeLast());
+      paid++;
+    }
+    if (paid > 0) {
+      _lastHeatNotice =
+          '🔥 $paid Heat défaussée(s) : Moteur → Défausse ($reason • reste ${_engineHeat.length} dans le moteur)';
+      _lastHeatNoticeIsCooldown = false;
+      _log(
+        'Heat payé ($reason) : $paid carte(s) Moteur → Défausse (reste ${_engineHeat.length}).',
+      );
     }
   }
 

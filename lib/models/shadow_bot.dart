@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 import 'heat_card.dart';
 import 'track_data.dart';
 
-/// État public minimal d'un pilote sur la piste (mode shadow : aucun plateau ni
-/// main du bot n'est exposé dans l'interface).
+/// État public visible sur la table pour chaque pilote (conformément aux règles :
+/// levier de vitesse, Heat restant dans le moteur, tailles pioche/défausse,
+/// carte du dessus de la défausse et cartes révélées ce tour — jamais la main cachée).
 class RacerTrackState {
   RacerTrackState({
     required this.id,
@@ -16,6 +17,19 @@ class RacerTrackState {
     this.lane = 0,
     this.diceRoll = 1,
     this.gear = 1,
+    this.previousGear = 1,
+    this.shiftHeatPaid = 0,
+    this.engineHeatCount = 5,
+    this.drawPileCount = 0,
+    this.discardPileCount = 0,
+    this.topDiscardCard,
+    this.revealedCardsThisRound = const [],
+    this.hiddenPlayedCount = 0,
+    this.turnSpeed = 0,
+    this.lastHeatSpent = 0,
+    this.lastHeatMissing = 0,
+    this.lastCooledHeat = 0,
+    this.lastSpunOut = false,
     this.finished = false,
     this.finishRank,
   });
@@ -26,14 +40,32 @@ class RacerTrackState {
   final bool isHuman;
 
   int progress;
-  int lane; // 0 = corde (Race Line), 1 = extérieur
+  int lane;
   int diceRoll;
   int gear;
+  int previousGear;
+  int shiftHeatPaid;
+  int engineHeatCount;
+  int drawPileCount;
+  int discardPileCount;
+  HeatCard? topDiscardCard;
+
+  /// Cartes révélées sur ce tour (visibles après résolution du pilote).
+  List<HeatCard> revealedCardsThisRound;
+
+  /// Nombre de cartes posées face cachée avant que le pilote ne révèle son tour.
+  int hiddenPlayedCount;
+
+  int turnSpeed;
+  int lastHeatSpent;
+  int lastHeatMissing;
+  int lastCooledHeat;
+  bool lastSpunOut;
   bool finished;
   int? finishRank;
 }
 
-/// Résultat animable du tour d'un bot en mode Shadow.
+/// Détail complet et transparent du tour d'un bot (sans jamais dévoiler sa main).
 class BotTurnOutcome {
   const BotTurnOutcome({
     required this.botId,
@@ -43,10 +75,23 @@ class BotTurnOutcome {
     required this.finalProgress,
     required this.finalLane,
     required this.pathProgresses,
+    required this.previousGear,
+    required this.gearBeforeSpinOut,
+    required this.finalGear,
+    required this.revealedCards,
     required this.speed,
-    required this.gear,
+    required this.shiftHeatPaid,
+    required this.boostHeatPaid,
+    required this.cornerHeatPaid,
+    required this.cornerHeatMissing,
+    required this.cooledHeatCount,
+    required this.engineHeatRemaining,
+    required this.usedAdrenaline,
     required this.usedSlipstream,
     required this.spunOut,
+    required this.stressTaken,
+    required this.clutteredHand,
+    required this.actionDetails,
     required this.summary,
   });
 
@@ -56,19 +101,37 @@ class BotTurnOutcome {
   final int startProgress;
   final int finalProgress;
   final int finalLane;
-
-  /// Suite des cases parcourues une par une (pour voir la voiture avancer !).
   final List<int> pathProgresses;
+
+  final int previousGear;
+  final int gearBeforeSpinOut;
+  final int finalGear;
+  final List<HeatCard> revealedCards;
   final int speed;
-  final int gear;
+
+  final int shiftHeatPaid;
+  final int boostHeatPaid;
+  final int cornerHeatPaid;
+  final int cornerHeatMissing;
+  final int cooledHeatCount;
+  final int engineHeatRemaining;
+
+  final bool usedAdrenaline;
   final bool usedSlipstream;
   final bool spunOut;
+  final int stressTaken;
+  final bool clutteredHand;
+
+  /// Liste détaillée des événements du tour (changement de vitesse, virages, Heat…).
+  final List<String> actionDetails;
   final String summary;
+
+  int get totalHeatSpent => shiftHeatPaid + boostHeatPaid + cornerHeatPaid;
 }
 
-/// Pilote adverse en mode Shadow : possède son propre deck complet, son moteur
-/// (5 Heat), sa main (7 cartes) et sa défausse, et applique exactement les
-/// mêmes règles que le joueur, sans aucune triche.
+/// Pilote adverse contrôlé par le jeu : possède son propre paquet réel, son
+/// moteur (5 Heat), sa main secrète (7 cartes) et sa défausse, et respecte
+/// strictement toutes les règles (y compris 1 Heat pour ±2 vitesses, virages, etc.).
 class ShadowBot {
   ShadowBot({
     required this.id,
@@ -93,17 +156,29 @@ class ShadowBot {
   bool finished = false;
   int? finishRank;
 
-  // État privé réel du bot (jamais affiché en mode shadow)
+  // État réel du bot
   int _gear = 1;
+  int _previousGear = 1;
+  int _shiftHeatPaidThisRound = 0;
   int _roundStartProgress = 0;
   bool _plannedCluttered = false;
+
   List<HeatCard> _drawPile = [];
   List<HeatCard> _hand = [];
   List<HeatCard> _playArea = [];
   List<HeatCard> _discardPile = [];
   List<HeatCard> _engineHeat = [];
 
+  // Informations publiques du tour en cours / dernier tour révélé
+  List<HeatCard> _lastRevealedCards = const [];
+  int _lastTurnSpeed = 0;
+  int _lastHeatSpent = 0;
+  int _lastHeatMissing = 0;
+  int _lastCooledHeat = 0;
+  bool _lastSpunOut = false;
+
   int get gear => _gear;
+  int get engineHeatCount => _engineHeat.length;
 
   RacerTrackState toTrackState() => RacerTrackState(
         id: id,
@@ -114,6 +189,19 @@ class ShadowBot {
         lane: lane,
         diceRoll: diceRoll,
         gear: _gear,
+        previousGear: _previousGear,
+        shiftHeatPaid: _shiftHeatPaidThisRound,
+        engineHeatCount: _engineHeat.length,
+        drawPileCount: _drawPile.length,
+        discardPileCount: _discardPile.length,
+        topDiscardCard: _discardPile.isEmpty ? null : _discardPile.last,
+        revealedCardsThisRound: List.unmodifiable(_lastRevealedCards),
+        hiddenPlayedCount: _playArea.length,
+        turnSpeed: _lastTurnSpeed,
+        lastHeatSpent: _lastHeatSpent,
+        lastHeatMissing: _lastHeatMissing,
+        lastCooledHeat: _lastCooledHeat,
+        lastSpunOut: _lastSpunOut,
         finished: finished,
         finishRank: finishRank,
       );
@@ -125,8 +213,17 @@ class ShadowBot {
     finished = false;
     finishRank = null;
     _gear = 1;
+    _previousGear = 1;
+    _shiftHeatPaidThisRound = 0;
     _roundStartProgress = 0;
     _plannedCluttered = false;
+
+    _lastRevealedCards = const [];
+    _lastTurnSpeed = 0;
+    _lastHeatSpent = 0;
+    _lastHeatMissing = 0;
+    _lastCooledHeat = 0;
+    _lastSpunOut = false;
 
     _drawPile = createDeutschlandStarterDeck(
       includeStartingUpgrades: includeStartingUpgrades,
@@ -138,12 +235,33 @@ class ShadowBot {
     _drawUpToSeven();
   }
 
+  /// Réinitialise l'affichage des cartes révélées au début d'une nouvelle manche.
+  void clearRoundDisplay() {
+    _previousGear = _gear;
+    _shiftHeatPaidThisRound = 0;
+    _lastRevealedCards = const [];
+    _lastTurnSpeed = 0;
+    _lastHeatSpent = 0;
+    _lastHeatMissing = 0;
+    _lastCooledHeat = 0;
+    _lastSpunOut = false;
+  }
+
   /// Étapes 1 & 2 (simultanées avec le joueur).
+  /// Paie réellement 1 Heat (Moteur → Défausse) en cas de changement ±2 vitesses !
   void planTurn({required int totalLaps}) {
     if (finished) return;
     _roundStartProgress = progress;
+    _previousGear = _gear;
+    _shiftHeatPaidThisRound = 0;
     _plannedCluttered = false;
     _playArea.clear();
+    _lastRevealedCards = const [];
+    _lastTurnSpeed = 0;
+    _lastHeatSpent = 0;
+    _lastHeatMissing = 0;
+    _lastCooledHeat = 0;
+    _lastSpunOut = false;
 
     final legalGears = <int>[];
     for (var g = 1; g <= 4; g++) {
@@ -207,27 +325,29 @@ class ShadowBot {
           worstHeatCost += max(0, worstSpeed - c.corner.speedLimit);
         }
 
-        double score = estSpeed * 3.8 - shiftCost * 4.2;
+        // Pénalité réaliste sur le ±2 vitesses (coûte 1 Heat précieux !)
+        double score = estSpeed * 3.4 - shiftCost * 8.5;
 
         if (estHeatCost > availableHeat) {
-          score -= 140.0 + (estHeatCost - availableHeat) * 25.0;
+          score -= 150.0 + (estHeatCost - availableHeat) * 25.0;
         } else {
-          final heatPenalty = (3.4 - aggressiveness * 1.4);
+          final heatPenalty = (4.2 - aggressiveness * 1.3);
           score -= estHeatCost * heatPenalty;
         }
 
         if (worstHeatCost > availableHeat && stressCount > 0) {
-          score -= (1.0 - aggressiveness) * 24.0;
+          score -= (1.0 - aggressiveness) * 26.0;
         }
 
-        if (heatInHand >= 2 && g == 1) score += 7.5;
-        if (heatInHand >= 1 && g == 2) score += 3.0;
+        // Encourager le refroidissement en V1/V2 si la main contient du Heat
+        if (heatInHand >= 2 && g == 1) score += 8.5;
+        if (heatInHand >= 1 && g == 2) score += 3.5;
 
         if (nextCorner.spacesBeforeCorner >= 7 && stressCount > 0) {
-          score += stressCount * 2.2;
+          score += stressCount * 2.0;
         }
 
-        score += random.nextDouble() * 0.9;
+        score += random.nextDouble() * 1.1;
 
         if (score > bestScore) {
           bestScore = score;
@@ -237,12 +357,15 @@ class ShadowBot {
       }
     }
 
+    // Étape 1 : paiement effectif du Heat si changement de ±2 vitesses
     final shiftCost = (bestGear - _gear).abs() == 2 ? 1 : 0;
     if (shiftCost > 0) {
       _payHeat(shiftCost);
+      _shiftHeatPaidThisRound = shiftCost;
     }
     _gear = bestGear;
 
+    // Étape 2 : poser exactement `_gear` cartes dans _playArea
     if (bestCards == null) {
       _plannedCluttered = true;
       final chosen = <HeatCard>[...playable];
@@ -261,7 +384,6 @@ class ShadowBot {
   }
 
   /// Étapes 3 à 9 du tour du bot dans l'ordre réel de la course.
-  /// Retourne le chemin case par case pour animer visuellement la voiture.
   BotTurnOutcome resolveTurn({
     required bool hasAdrenaline,
     required int totalLaps,
@@ -272,7 +394,19 @@ class ShadowBot {
   }) {
     final startProg = progress;
     final path = <int>[];
+    final details = <String>[];
     final finishProgress = totalLaps * DeutschlandTrack.totalSpaces;
+    final gearBeforeSpin = _gear;
+
+    if (_shiftHeatPaidThisRound > 0) {
+      details.add(
+        'Levier V$_previousGear → V$_gear : 🔥 $_shiftHeatPaidThisRound Heat payé (Moteur → Défausse)',
+      );
+    } else if (_gear != _previousGear) {
+      details.add('Levier V$_previousGear → V$_gear (gratuit)');
+    } else {
+      details.add('Levier maintenu en V$_gear');
+    }
 
     void appendStepsTo(int from, int to) {
       if (to > from) {
@@ -285,10 +419,20 @@ class ShadowBot {
     }
 
     if (_plannedCluttered) {
+      final revealed = List<HeatCard>.from(_playArea);
       _gear = 1;
       _discardPile.addAll(_playArea);
       _playArea.clear();
       _drawUpToSeven();
+
+      _lastRevealedCards = revealed;
+      _lastTurnSpeed = 0;
+      _lastHeatSpent = _shiftHeatPaidThisRound;
+      _lastHeatMissing = 0;
+      _lastCooledHeat = 0;
+      _lastSpunOut = false;
+      details.add('Main encombrée : reste sur place, levier remis en V1');
+
       return BotTurnOutcome(
         botId: id,
         botName: name,
@@ -297,11 +441,24 @@ class ShadowBot {
         finalProgress: progress,
         finalLane: lane,
         pathProgresses: const [],
+        previousGear: _previousGear,
+        gearBeforeSpinOut: gearBeforeSpin,
+        finalGear: _gear,
+        revealedCards: revealed,
         speed: 0,
-        gear: _gear,
+        shiftHeatPaid: _shiftHeatPaidThisRound,
+        boostHeatPaid: 0,
+        cornerHeatPaid: 0,
+        cornerHeatMissing: 0,
+        cooledHeatCount: 0,
+        engineHeatRemaining: _engineHeat.length,
+        usedAdrenaline: false,
         usedSlipstream: false,
         spunOut: false,
-        summary: '$name : main encombrée → reste sur place, boîte remise en V1.',
+        stressTaken: 0,
+        clutteredHand: true,
+        actionDetails: details,
+        summary: '$name : main encombrée → reste sur place, levier remis en V1.',
       );
     }
 
@@ -316,6 +473,7 @@ class ShadowBot {
       if (basic != null) {
         _playArea.add(basic);
         speed += basic.speedValue ?? 0;
+        details.add('Stress (+) → retourné ${basic.displayName}');
       }
     }
 
@@ -327,7 +485,7 @@ class ShadowBot {
     simProgress = moved.progress;
     simLane = moved.lane;
 
-    // Étapes 4 & 5 : Réagir (Cooldown, Adrénaline +1, Boost)
+    // Étapes 4 & 5 : Réagir (Refroidissement, Adrénaline +1, Boost)
     final maxCooldown =
         (_gear == 1 ? 3 : (_gear == 2 ? 1 : 0)) + (hasAdrenaline ? 1 : 0);
     var cooled = 0;
@@ -337,7 +495,11 @@ class ShadowBot {
       _engineHeat.add(_hand.removeAt(heatIdx));
       cooled++;
     }
+    if (cooled > 0) {
+      details.add('❄️ Refroidissement : +$cooled Heat (Main → Moteur)');
+    }
 
+    var usedAdrenalineSpeed = false;
     if (hasAdrenaline) {
       final nextProgress = simProgress + 1;
       final testCorners = DeutschlandTrack.crossedCorners(
@@ -351,21 +513,26 @@ class ShadowBot {
       );
       if (reqHeat <= _engineHeat.length) {
         speed += 1;
+        usedAdrenalineSpeed = true;
         final adrPos = findOpenSpot(id, nextProgress);
         appendStepsTo(simProgress, adrPos.progress);
         simProgress = adrPos.progress;
         simLane = adrPos.lane;
+        details.add('⚡ Adrénaline : +1 Vitesse et +1 case');
       }
     }
 
+    // Boost optionnel (1x/tour, paye 1 Heat) uniquement sur ligne droite dégagée
+    var boostHeatPaid = 0;
     final infoAfterMove = DeutschlandTrack.nextCornerInfo(
       progress: simProgress,
       totalLaps: totalLaps,
     );
     if (_engineHeat.length >= 3 &&
-        infoAfterMove.spacesBeforeCorner >= 7 &&
-        random.nextDouble() < (0.25 + aggressiveness * 0.35)) {
+        infoAfterMove.spacesBeforeCorner >= 8 &&
+        random.nextDouble() < (0.15 + aggressiveness * 0.25)) {
       _payHeat(1);
+      boostHeatPaid = 1;
       final boostCard = _flipUntilBasicCard();
       if (boostCard != null) {
         _playArea.add(boostCard);
@@ -375,10 +542,13 @@ class ShadowBot {
         appendStepsTo(simProgress, boostPos.progress);
         simProgress = boostPos.progress;
         simLane = boostPos.lane;
+        details.add(
+          '🔥 Boost (-1 Heat Moteur → Défausse) : +$add (${boostCard.displayName})',
+        );
       }
     }
 
-    // Étape 6 : Aspiration
+    // Étape 6 : Aspiration (+2 cases, ne compte pas pour la vitesse en virage)
     var usedSlipstream = false;
     if (simProgress + 2 < finishProgress && hasSlipstreamTarget(simProgress)) {
       final slipCorners = DeutschlandTrack.crossedCorners(
@@ -396,6 +566,7 @@ class ShadowBot {
         simProgress = slipPos.progress;
         simLane = slipPos.lane;
         usedSlipstream = true;
+        details.add('⏩ Aspiration : +2 cases');
       }
     }
 
@@ -405,21 +576,36 @@ class ShadowBot {
       toProgress: simProgress,
       totalLaps: totalLaps,
     );
-    var totalHeatPaidCorners = 0;
+    var cornerHeatPaid = 0;
+    var cornerHeatMissing = 0;
+    var stressTaken = 0;
     TrackCorner? spinOutCorner;
     for (final event in crossed) {
       final excess = max(0, speed - event.corner.speedLimit);
-      if (excess == 0) continue;
+      if (excess == 0) {
+        details.add(
+          '✓ ${event.corner.name} (lim. ${event.corner.speedLimit}) franchi à $speed → OK',
+        );
+        continue;
+      }
       if (_engineHeat.length >= excess) {
         _payHeat(excess);
-        totalHeatPaidCorners += excess;
+        cornerHeatPaid += excess;
+        details.add(
+          '🔥 ${event.corner.name} (lim. ${event.corner.speedLimit}, vit. $speed) : $excess Heat payé(s)',
+        );
       } else {
         final paid = _engineHeat.length;
+        final missing = excess - paid;
         if (paid > 0) _payHeat(paid);
+        cornerHeatPaid += paid;
+        cornerHeatMissing = missing;
+
         final stressPenalty = _gear <= 2 ? 1 : 2;
         for (var s = 0; s < stressPenalty; s++) {
           if (sharedStressReserve.isNotEmpty) {
             _hand.add(sharedStressReserve.removeLast());
+            stressTaken++;
           }
         }
         final spinPos = findOpenSpot(id, event.spaceBeforeCornerProgress);
@@ -428,6 +614,9 @@ class ShadowBot {
         simLane = spinPos.lane;
         _gear = 1;
         spinOutCorner = event.corner;
+        details.add(
+          '💥 TÊTE-À-QUEUE au ${event.corner.name} : manquait $missing Heat ! (+$stressTaken Stress, levier → V1)',
+        );
         break;
       }
     }
@@ -456,25 +645,27 @@ class ShadowBot {
       _discardPile.add(c);
     }
 
-    // Étape 9 : Défausse zone de jeu + repioche à 7
+    // Étape 9 : Révélation sauvegardée + défausse zone de jeu + repioche à 7
+    final revealed = List<HeatCard>.from(_playArea);
     _discardPile.addAll(_playArea);
     _playArea.clear();
     _drawUpToSeven();
 
-    final spaceNum = DeutschlandTrack.spaceForProgress(simProgress).spaceNumber;
-    final notes = <String>[];
-    if (usedSlipstream) notes.add('aspiration +2');
-    if (spinOutCorner != null) {
-      notes.add('TÊTE-À-QUEUE au ${spinOutCorner.name} !');
-    } else if (totalHeatPaidCorners > 0) {
-      notes.add('virage franchi');
-    }
-    if (simProgress >= finishProgress) {
-      notes.add('LIGNE D\'ARRIVÉE FRANCHIE !');
-    }
+    final totalSpent = _shiftHeatPaidThisRound + boostHeatPaid + cornerHeatPaid;
+    _lastRevealedCards = revealed;
+    _lastTurnSpeed = speed;
+    _lastHeatSpent = totalSpent;
+    _lastHeatMissing = cornerHeatMissing;
+    _lastCooledHeat = cooled;
+    _lastSpunOut = spinOutCorner != null;
 
-    final extra = notes.isEmpty ? '' : ' (${notes.join(', ')})';
-    final summary = '$name (V$_gear) : vitesse $speed → case $spaceNum$extra.';
+    final spaceNum = DeutschlandTrack.spaceForProgress(simProgress).spaceNumber;
+    final cardsLabel = revealed.map((c) => c.shortLabel).join('+');
+    final heatSummary = cornerHeatMissing > 0
+        ? 'manquait $cornerHeatMissing🔥 → Tête-à-queue'
+        : 'moteur : ${_engineHeat.length}🔥${totalSpent > 0 ? " (-$totalSpent🔥)" : ""}';
+    final summary =
+        '$name (V$_previousGear→V$_gear) [$cardsLabel] = vit. $speed → case $spaceNum ($heatSummary).';
 
     return BotTurnOutcome(
       botId: id,
@@ -484,10 +675,23 @@ class ShadowBot {
       finalProgress: simProgress,
       finalLane: simLane,
       pathProgresses: path,
+      previousGear: _previousGear,
+      gearBeforeSpinOut: gearBeforeSpin,
+      finalGear: _gear,
+      revealedCards: revealed,
       speed: speed,
-      gear: _gear,
+      shiftHeatPaid: _shiftHeatPaidThisRound,
+      boostHeatPaid: boostHeatPaid,
+      cornerHeatPaid: cornerHeatPaid,
+      cornerHeatMissing: cornerHeatMissing,
+      cooledHeatCount: cooled,
+      engineHeatRemaining: _engineHeat.length,
+      usedAdrenaline: usedAdrenalineSpeed,
       usedSlipstream: usedSlipstream,
       spunOut: spinOutCorner != null,
+      stressTaken: stressTaken,
+      clutteredHand: false,
+      actionDetails: details,
       summary: summary,
     );
   }

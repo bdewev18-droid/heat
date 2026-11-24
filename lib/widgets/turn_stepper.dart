@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import '../models/game_state.dart';
 import '../theme/heat_theme.dart';
+import 'heat_card_widget.dart';
 
 /// Panneau de suivi complet :
 /// 1. Suivi de l'ordre de passage des 3 voitures (au-dessus des étapes)
@@ -368,7 +369,7 @@ class TurnStepperPanel extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Tour de ${outcome.botName} (Mode Shadow)',
+                  'Tour de ${outcome.botName}',
                   style: TextStyle(
                     fontWeight: FontWeight.w900,
                     fontSize: 14,
@@ -376,31 +377,107 @@ class TurnStepperPanel extends StatelessWidget {
                   ),
                 ),
               ),
-              if (animating)
+              // Levier de vitesse + Vitesse totale
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: HeatColors.navyHeader,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Levier V${outcome.previousGear}→V${outcome.finalGear} • Vit. ${outcome.speed}',
+                  style: const TextStyle(
+                    color: HeatColors.heatGold,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+              if (animating) ...[
+                const SizedBox(width: 8),
                 const SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          // Cartes jouées / révélées par le bot ce tour
+          if (outcome.revealedCards.isNotEmpty) ...[
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ...outcome.revealedCards.map(
+                  (c) => HeatCardWidget(
+                    card: c,
+                    width: 48,
+                    height: 68,
+                    enabled: true,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+
+          // Bilan Heat restant / dépensé / manquant / refroidi
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _BotStatTag(
+                label: '🔥 Moteur restant : ${outcome.engineHeatRemaining}',
+                color: outcome.engineHeatRemaining <= 1
+                    ? HeatColors.heatRed
+                    : HeatColors.navyHeader,
+              ),
+              if (outcome.totalHeatSpent > 0)
+                _BotStatTag(
+                  label: '🔥 Heat dépensé : -${outcome.totalHeatSpent}',
+                  color: HeatColors.heatOrange,
+                ),
+              if (outcome.cornerHeatMissing > 0)
+                _BotStatTag(
+                  label:
+                      '❌ Manquait ${outcome.cornerHeatMissing} Heat → Tête-à-queue !',
+                  color: HeatColors.heatRed,
+                ),
+              if (outcome.cooledHeatCount > 0)
+                _BotStatTag(
+                  label: '❄️ Refroidi : +${outcome.cooledHeatCount} Heat',
+                  color: HeatColors.cooldownBlue,
+                ),
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            animating
-                ? '${outcome.botName} avance sur la piste… (vitesse ${outcome.speed})'
-                : outcome.summary,
-            style: const TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: HeatColors.inkDark,
+
+          // Détails des étapes du tour du bot
+          ...outcome.actionDetails.map(
+            (d) => Padding(
+              padding: const EdgeInsets.only(bottom: 2),
+              child: Text(
+                '• $d',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: HeatColors.inkDark,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 10),
+
+          const SizedBox(height: 8),
           ElevatedButton.icon(
             onPressed: controller.proceedAfterBotTurn,
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-                  nextDriver?.isHuman == true ? HeatColors.heatRed : outcome.botColor,
+              backgroundColor: nextDriver?.isHuman == true
+                  ? HeatColors.heatRed
+                  : outcome.botColor,
             ),
             icon: const Icon(Icons.arrow_forward, size: 18),
             label: Text(buttonLabel),
@@ -1212,6 +1289,36 @@ class TurnStepperPanel extends StatelessWidget {
             label: Text(continueLabel),
           ),
       ],
+    );
+  }
+}
+
+class _BotStatTag extends StatelessWidget {
+  const _BotStatTag({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
+      ),
     );
   }
 }

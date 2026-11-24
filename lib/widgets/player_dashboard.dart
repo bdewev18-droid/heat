@@ -591,37 +591,191 @@ class PlayerDashboard extends StatelessWidget {
               Icon(Icons.history, size: 15, color: HeatColors.navyHeader),
               SizedBox(width: 6),
               Text(
-                'JOURNAL DE COURSE',
+                'RÉCAP DES ACTIONS (CARTES • LEVIER • HEAT)',
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w900,
-                  letterSpacing: 0.9,
+                  letterSpacing: 0.8,
                   color: HeatColors.navyHeader,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          SizedBox(
-            height: 115,
-            child: ListView.separated(
-              itemCount: controller.eventLog.length,
-              separatorBuilder: (_, _) =>
-                  const Divider(height: 8, color: HeatColors.paperBorder),
-              itemBuilder: (context, index) {
-                return Text(
-                  controller.eventLog[index],
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: index == 0 ? HeatColors.inkDark : HeatColors.inkMuted,
-                    fontWeight:
-                        index == 0 ? FontWeight.w700 : FontWeight.normal,
-                  ),
-                );
-              },
+          const SizedBox(height: 8),
+          if (controller.recapEntries.isEmpty)
+            Text(
+              controller.eventLog.isNotEmpty
+                  ? controller.eventLog.first
+                  : 'Aucune action enregistrée pour le moment.',
+              style: const TextStyle(fontSize: 11.5, color: HeatColors.inkMuted),
+            )
+          else
+            SizedBox(
+              height: 210,
+              child: ListView.separated(
+                itemCount: controller.recapEntries.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  return _RecapEntryCard(entry: controller.recapEntries[index]);
+                },
+              ),
             ),
-          ),
         ],
+      ),
+    );
+  }
+}
+
+class _RecapEntryCard extends StatelessWidget {
+  const _RecapEntryCard({required this.entry});
+
+  final RaceRecapEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: HeatColors.paperCream,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: entry.spunOut
+              ? HeatColors.heatRed
+              : entry.racerColor.withValues(alpha: 0.65),
+          width: entry.spunOut ? 1.8 : 1.2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // En-tête : Manche, Pilote, Levier de vitesse, Vitesse & Case
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: entry.racerColor,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  'M${entry.roundNumber} • ${entry.racerName}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 10.5,
+                  ),
+                ),
+              ),
+              _RecapBadge(
+                text:
+                    'Levier V${entry.previousGear}→V${entry.finalGear}${entry.shiftHeatPaid > 0 ? " (-1🔥)" : ""}',
+                bg: HeatColors.navyHeader,
+                fg: HeatColors.heatGold,
+              ),
+              _RecapBadge(
+                text: 'Vit. ${entry.speed} → C${entry.spaceNumber}',
+                bg: HeatColors.paperCard,
+                fg: HeatColors.inkDark,
+                border: HeatColors.paperBorder,
+              ),
+              _RecapBadge(
+                text: 'Moteur : ${entry.engineHeatRemaining}🔥',
+                bg: entry.engineHeatRemaining <= 1
+                    ? HeatColors.heatRed.withValues(alpha: 0.16)
+                    : HeatColors.heatOrange.withValues(alpha: 0.15),
+                fg: entry.engineHeatRemaining <= 1
+                    ? HeatColors.heatRed
+                    : HeatColors.inkDark,
+                border: entry.engineHeatRemaining <= 1
+                    ? HeatColors.heatRed
+                    : HeatColors.heatOrange,
+              ),
+              if (entry.heatSpent > 0)
+                _RecapBadge(
+                  text: '-${entry.heatSpent}🔥 dépensé',
+                  bg: HeatColors.heatOrange.withValues(alpha: 0.18),
+                  fg: HeatColors.heatRed,
+                ),
+              if (entry.heatMissing > 0)
+                _RecapBadge(
+                  text: '❌ Manquait ${entry.heatMissing}🔥',
+                  bg: HeatColors.heatRed,
+                  fg: Colors.white,
+                ),
+              if (entry.cooledHeat > 0)
+                _RecapBadge(
+                  text: '❄️ +${entry.cooledHeat} refroidi',
+                  bg: HeatColors.cooldownBlue.withValues(alpha: 0.16),
+                  fg: HeatColors.cooldownBlue,
+                ),
+            ],
+          ),
+          if (entry.cards.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 5,
+              runSpacing: 5,
+              children: entry.cards
+                  .map(
+                    (c) => HeatCardWidget(
+                      card: c,
+                      width: 38,
+                      height: 54,
+                      enabled: true,
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
+          if (entry.details.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              entry.details.join(' • '),
+              style: const TextStyle(
+                fontSize: 10.5,
+                color: HeatColors.inkMuted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RecapBadge extends StatelessWidget {
+  const _RecapBadge({
+    required this.text,
+    required this.bg,
+    required this.fg,
+    this.border,
+  });
+
+  final String text;
+  final Color bg;
+  final Color fg;
+  final Color? border;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: border != null ? Border.all(color: border!) : null,
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: fg,
+        ),
       ),
     );
   }

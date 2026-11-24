@@ -59,7 +59,14 @@ void main() {
 
     // Avancer les bots devant le joueur si présents
     while (controller.step == RoundStep.botTurn) {
-      expect(controller.activeBotOutcome, isNotNull);
+      final outcome = controller.activeBotOutcome!;
+      // Vérifie la dépense stricte de 1 Heat lors d'un changement ±2 vitesses
+      if ((outcome.gearBeforeSpinOut - outcome.previousGear).abs() == 2) {
+        expect(outcome.shiftHeatPaid, 1);
+      } else {
+        expect(outcome.shiftHeatPaid, 0);
+      }
+      expect(outcome.revealedCards, isNotEmpty);
       controller.proceedAfterBotTurn();
     }
 
@@ -89,13 +96,22 @@ void main() {
 
     // Avancer les bots derrière le joueur si présents
     while (controller.step == RoundStep.botTurn) {
-      expect(controller.activeBotOutcome, isNotNull);
+      final outcome = controller.activeBotOutcome!;
+      if ((outcome.gearBeforeSpinOut - outcome.previousGear).abs() == 2) {
+        expect(outcome.shiftHeatPaid, 1);
+      } else {
+        expect(outcome.shiftHeatPaid, 0);
+      }
+      expect(outcome.revealedCards, isNotEmpty);
       controller.proceedAfterBotTurn();
     }
 
     expect(controller.roundNumber, 2);
     expect(controller.step, RoundStep.shiftGears);
     expect(controller.hand.length, 7);
+    // 3 pilotes ont joué la manche 1 → 3 entrées de récap avec cartes & Heat
+    expect(controller.recapEntries.length, 3);
+    expect(controller.opponentStates.length, 2);
 
     final bots = controller.standings.where((r) => !r.isHuman).toList();
     expect(bots.any((b) => b.progress > 0), isTrue);

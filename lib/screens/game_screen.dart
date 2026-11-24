@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/game_state.dart';
 import '../models/track_data.dart';
 import '../theme/heat_theme.dart';
+import '../widgets/opponents_panel.dart';
 import '../widgets/player_dashboard.dart';
 import '../widgets/track_board.dart';
 import '../widgets/turn_stepper.dart';
@@ -208,6 +209,8 @@ class _GameScreenState extends State<GameScreen> {
                                 _buildTelemetryAndStandings(),
                                 const SizedBox(height: 10),
                                 Expanded(child: board),
+                                const SizedBox(height: 10),
+                                OpponentsPanel(controller: _controller),
                               ],
                             ),
                           ),
@@ -244,6 +247,8 @@ class _GameScreenState extends State<GameScreen> {
                         TurnStepperPanel(controller: _controller),
                         const SizedBox(height: 10),
                         PlayerDashboard(controller: _controller),
+                        const SizedBox(height: 10),
+                        OpponentsPanel(controller: _controller),
                       ],
                     ),
                   );

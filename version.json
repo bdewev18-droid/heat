@@ -1,6 +1,6 @@
 {
-  "version": "1.3.0",
-  "buildNumber": 4,
+  "version": "1.4.0",
+  "buildNumber": 5,
   "apkUrl": "https://github.com/bdewev18-droid/heat/releases/latest/download/app-release.apk",
-  "releaseNotes": "v1.3.0 : Voitures centrées au milieu des cases, suivi visuel de l'ordre des tours (1er devant + animation pas à pas des 2 bots), option Mode Compétition (sans cartes 0/5 par défaut), gestion explicite du Heat/Refroidissement."
+  "releaseNotes": "v1.4.0 : Tableaux de bord compacts des 2 adversaires (levier de vitesse, cartes jouées, Heat moteur, pioche/défausse), récap des actions détaillé avec cartes visuelles et Heat restant/dépensé/manquant, équilibrage du passage ±2 vitesses des bots."
 }

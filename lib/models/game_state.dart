@@ -63,6 +63,48 @@ class CornerCheckResult {
   final int stressTaken;
 }
 
+/// Entrée structurée du récapitulatif des actions (cartes jouées, levier de
+/// vitesse, Heat restant / dépensé / manquant, refroidissement).
+class RaceRecapEntry {
+  const RaceRecapEntry({
+    required this.roundNumber,
+    required this.racerId,
+    required this.racerName,
+    required this.racerColor,
+    required this.isHuman,
+    required this.previousGear,
+    required this.finalGear,
+    required this.shiftHeatPaid,
+    required this.cards,
+    required this.speed,
+    required this.spaceNumber,
+    required this.engineHeatRemaining,
+    required this.heatSpent,
+    required this.heatMissing,
+    required this.cooledHeat,
+    required this.spunOut,
+    required this.details,
+  });
+
+  final int roundNumber;
+  final String racerId;
+  final String racerName;
+  final Color racerColor;
+  final bool isHuman;
+  final int previousGear;
+  final int finalGear;
+  final int shiftHeatPaid;
+  final List<HeatCard> cards;
+  final int speed;
+  final int spaceNumber;
+  final int engineHeatRemaining;
+  final int heatSpent;
+  final int heatMissing;
+  final int cooledHeat;
+  final bool spunOut;
+  final List<String> details;
+}
+
 /// Moteur complet des règles de base de Heat (circuit Deutschland) avec :
 /// - Mode Compétition (sans 0/5 par défaut) ou Initiation (avec 0/5/+1 Heat)
 /// - 2 Bots Shadow sans triche avec suivi visuel tour par tour (1er devant commence)
@@ -144,6 +186,14 @@ class HeatGameController extends ChangeNotifier {
 
   final Set<String> _selectedCardIds = {};
   final List<String> _eventLog = [];
+  final List<RaceRecapEntry> _recapEntries = [];
+
+  int _playerShiftHeatPaid = 0;
+  int _playerHeatSpentThisRound = 0;
+  int _playerHeatMissingThisRound = 0;
+  int _playerCooledThisRound = 0;
+  bool _playerSpunOutThisRound = false;
+  final List<String> _playerRoundDetails = [];
 
   @override
   void dispose() {
@@ -193,6 +243,11 @@ class HeatGameController extends ChangeNotifier {
   List<HeatCard> get stressReserve => List.unmodifiable(_stressReserve);
   Set<String> get selectedCardIds => Set.unmodifiable(_selectedCardIds);
   List<String> get eventLog => List.unmodifiable(_eventLog);
+  List<RaceRecapEntry> get recapEntries => List.unmodifiable(_recapEntries);
+
+  /// États publics des 2 adversaires (ordre fixe Bleu / Vert pour la stabilité visuelle).
+  List<RacerTrackState> get opponentStates =>
+      _bots.map((b) => b.toTrackState()).toList();
 
   TrackSpace get currentSpace => DeutschlandTrack.spaceForProgress(_carProgress);
   int get currentLap => DeutschlandTrack.lapForProgress(_carProgress);
@@ -224,6 +279,18 @@ class HeatGameController extends ChangeNotifier {
         lane: _carLane,
         diceRoll: _playerDiceRoll,
         gear: _gear,
+        previousGear: _roundStartGear,
+        shiftHeatPaid: _playerShiftHeatPaid,
+        engineHeatCount: _engineHeat.length,
+        drawPileCount: _drawPile.length,
+        discardPileCount: _discardPile.length,
+        topDiscardCard: _discardPile.isEmpty ? null : _discardPile.last,
+        revealedCardsThisRound: List.unmodifiable(_playArea),
+        turnSpeed: _turnSpeed,
+        lastHeatSpent: _playerHeatSpentThisRound,
+        lastHeatMissing: _playerHeatMissingThisRound,
+        lastCooledHeat: _playerCooledThisRound,
+        lastSpunOut: _playerSpunOutThisRound,
         finished: _playerFinished,
         finishRank: _playerFinishRank,
       ),
@@ -372,6 +439,13 @@ class HeatGameController extends ChangeNotifier {
     _playArea = [];
     _discardPile = [];
     _eventLog.clear();
+    _recapEntries.clear();
+    _playerShiftHeatPaid = 0;
+    _playerHeatSpentThisRound = 0;
+    _playerHeatMissingThisRound = 0;
+    _playerCooledThisRound = 0;
+    _playerSpunOutThisRound = false;
+    _playerRoundDetails.clear();
 
     _bots = [
       ShadowBot(
@@ -471,11 +545,15 @@ class HeatGameController extends ChangeNotifier {
     if (cost > _engineHeat.length) return;
 
     _lastHeatNotice = null;
+    _playerShiftHeatPaid = cost;
     if (cost > 0) {
       _payHeat(cost, reason: 'Changement de vitesse ±2 ($_roundStartGear → $_selectedTargetGear)');
+      _playerRoundDetails.add('Levier V$_roundStartGear → V$_selectedTargetGear : 🔥 -1 Heat');
     } else if (_selectedTargetGear != _roundStartGear) {
       _log('Étape 1 : Vitesse $_roundStartGear → $_selectedTargetGear.');
+      _playerRoundDetails.add('Levier V$_roundStartGear → V$_selectedTargetGear');
     } else {
+      _playerRoundDetails.add('Levier maintenu en V$_selectedTargetGear');
       _log('Étape 1 : Maintien en vitesse $_selectedTargetGear.');
     }
 
@@ -635,6 +713,28 @@ class HeatGameController extends ChangeNotifier {
     _activeBotOutcome = outcome;
     _botAnimStepIdx = 0;
     _log(outcome.summary);
+    _addRecapEntry(
+      RaceRecapEntry(
+        roundNumber: _roundNumber,
+        racerId: outcome.botId,
+        racerName: outcome.botName,
+        racerColor: outcome.botColor,
+        isHuman: false,
+        previousGear: outcome.previousGear,
+        finalGear: outcome.finalGear,
+        shiftHeatPaid: outcome.shiftHeatPaid,
+        cards: outcome.revealedCards,
+        speed: outcome.speed,
+        spaceNumber:
+            DeutschlandTrack.spaceForProgress(outcome.finalProgress).spaceNumber,
+        engineHeatRemaining: outcome.engineHeatRemaining,
+        heatSpent: outcome.totalHeatSpent,
+        heatMissing: outcome.cornerHeatMissing,
+        cooledHeat: outcome.cooledHeatCount,
+        spunOut: outcome.spunOut,
+        details: outcome.actionDetails,
+      ),
+    );
 
     if (outcome.pathProgresses.isEmpty) {
       bot.progress = outcome.finalProgress;
@@ -859,6 +959,8 @@ class HeatGameController extends ChangeNotifier {
       count++;
     }
     if (count > 0) {
+      _playerCooledThisRound += count;
+      _playerRoundDetails.add('❄️ Refroidissement : +$count Heat (Main → Moteur)');
       _lastHeatNotice =
           '❄️ $count carte(s) Heat renvoyée(s) : Main → Moteur (${_engineHeat.length} dans le moteur)';
       _lastHeatNoticeIsCooldown = true;
@@ -875,6 +977,8 @@ class HeatGameController extends ChangeNotifier {
     _hand.remove(card);
     _engineHeat.add(card);
     _cooldownsUsed++;
+    _playerCooledThisRound++;
+    _playerRoundDetails.add('❄️ Refroidissement : +1 Heat (Main → Moteur)');
     _lastHeatNotice =
         '❄️ 1 Heat renvoyée : Main → Moteur (${_engineHeat.length} dans le moteur)';
     _lastHeatNoticeIsCooldown = true;
@@ -987,6 +1091,9 @@ class HeatGameController extends ChangeNotifier {
             );
           } else {
             final paid = _engineHeat.length;
+            final missing = excess - paid;
+            _playerHeatMissingThisRound = missing;
+            _playerSpunOutThisRound = true;
             if (paid > 0) {
               _payHeat(paid, reason: 'Tête-à-queue (${event.corner.name})');
             }
@@ -1007,6 +1114,9 @@ class HeatGameController extends ChangeNotifier {
             _carProgress = placed.progress;
             _carLane = placed.lane;
             _gear = 1;
+            _playerRoundDetails.add(
+              '💥 Tête-à-queue (${event.corner.name}) : manquait $missing🔥, +$actualStress Stress, levier → V1',
+            );
 
             results.add(
               CornerCheckResult(
@@ -1065,6 +1175,29 @@ class HeatGameController extends ChangeNotifier {
   void replenishAndStartNextRound() {
     if (_step != RoundStep.replenishHand) return;
 
+    final playedSnapshot = List<HeatCard>.from(_playArea);
+    _addRecapEntry(
+      RaceRecapEntry(
+        roundNumber: _roundNumber,
+        racerId: 'player',
+        racerName: 'Toi (Rouge)',
+        racerColor: HeatColors.heatRed,
+        isHuman: true,
+        previousGear: _roundStartGear,
+        finalGear: _gear,
+        shiftHeatPaid: _playerShiftHeatPaid,
+        cards: playedSnapshot,
+        speed: _turnSpeed,
+        spaceNumber: currentSpace.spaceNumber,
+        engineHeatRemaining: _engineHeat.length,
+        heatSpent: _playerHeatSpentThisRound,
+        heatMissing: _playerHeatMissingThisRound,
+        cooledHeat: _playerCooledThisRound,
+        spunOut: _playerSpunOutThisRound,
+        details: List<String>.from(_playerRoundDetails),
+      ),
+    );
+
     if (_playArea.isNotEmpty) {
       _discardPile.addAll(_playArea);
       _playArea.clear();
@@ -1110,6 +1243,12 @@ class HeatGameController extends ChangeNotifier {
     _cornersResolved = false;
     _lastCornerResults = const [];
     _selectedCardIds.clear();
+    _playerShiftHeatPaid = 0;
+    _playerHeatSpentThisRound = 0;
+    _playerHeatMissingThisRound = 0;
+    _playerCooledThisRound = 0;
+    _playerSpunOutThisRound = false;
+    _playerRoundDetails.clear();
     _step = RoundStep.shiftGears;
     notifyListeners();
   }
@@ -1210,12 +1349,21 @@ class HeatGameController extends ChangeNotifier {
       paid++;
     }
     if (paid > 0) {
+      _playerHeatSpentThisRound += paid;
+      _playerRoundDetails.add('🔥 $paid Heat ($reason)');
       _lastHeatNotice =
           '🔥 $paid Heat défaussée(s) : Moteur → Défausse ($reason • reste ${_engineHeat.length} dans le moteur)';
       _lastHeatNoticeIsCooldown = false;
       _log(
         'Heat payé ($reason) : $paid carte(s) Moteur → Défausse (reste ${_engineHeat.length}).',
       );
+    }
+  }
+
+  void _addRecapEntry(RaceRecapEntry entry) {
+    _recapEntries.insert(0, entry);
+    if (_recapEntries.length > 30) {
+      _recapEntries.removeRange(30, _recapEntries.length);
     }
   }
 

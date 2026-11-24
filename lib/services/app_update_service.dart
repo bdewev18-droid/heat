@@ -6,8 +6,8 @@ import 'package:http/http.dart' as http;
 import '../theme/heat_theme.dart';
 import 'app_update_page.dart';
 
-const String appVersionLabel = '1.4.0';
-const int appBuildNumber = 5;
+const String appVersionLabel = '1.5.0';
+const int appBuildNumber = 6;
 
 class RemoteAppVersion {
   const RemoteAppVersion({

@@ -1,6 +1,6 @@
 {
-  "version": "1.4.0",
-  "buildNumber": 5,
+  "version": "1.5.0",
+  "buildNumber": 6,
   "apkUrl": "https://github.com/bdewev18-droid/heat/releases/latest/download/app-release.apk",
-  "releaseNotes": "v1.4.0 : Tableaux de bord compacts des 2 adversaires (levier de vitesse, cartes jouées, Heat moteur, pioche/défausse), récap des actions détaillé avec cartes visuelles et Heat restant/dépensé/manquant, équilibrage du passage ±2 vitesses des bots."
+  "releaseNotes": "v1.5.0 (Build 6) : Signature Android persistante pour mises à jour sans conflit, tableaux de bord compacts des 2 adversaires, récap des actions avec cartes et Heat restant/dépensé/manquant."
 }

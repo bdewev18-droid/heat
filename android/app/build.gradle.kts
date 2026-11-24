@@ -25,11 +25,19 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("heatRelease") {
+            storeFile = file("heat-release.p12")
+            storeType = "PKCS12"
+            storePassword = "heatrelease"
+            keyAlias = "heat-release"
+            keyPassword = "heatrelease"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("heatRelease")
         }
     }
 }

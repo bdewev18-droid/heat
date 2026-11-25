@@ -18,6 +18,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _showTrackSelection = false;
   int _selectedLaps = DeutschlandTrack.defaultLaps;
+  int _playerCount = 3;
   bool _includeStartingUpgrades = false;
 
   RemoteAppVersion? _pendingUpdate;
@@ -46,6 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
         builder: (_) => GameScreen(
           totalLaps: _selectedLaps,
           includeStartingUpgrades: _includeStartingUpgrades,
+          playerCount: _playerCount,
         ),
       ),
     );
@@ -375,10 +377,46 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         _TrackStatChip(label: '5 Heat moteur'),
                         _TrackStatChip(label: '3 Stress départ'),
-                        _TrackStatChip(label: 'Toi + 2 Bots Shadow'),
+                        _TrackStatChip(label: '1 à 8 joueurs (0–7 bots)'),
                       ],
                     ),
                     const SizedBox(height: 14),
+                    // Choix du nombre de joueurs (1 à 8, max 7 bots)
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Nombre de joueurs : $_playerCount '
+                          '(${_playerCount == 1 ? "Solo" : "Toi + ${_playerCount - 1} bot${_playerCount - 1 > 1 ? "s" : ""}"})',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: HeatColors.navyHeader,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: List.generate(8, (index) {
+                            final count = index + 1;
+                            final selected = _playerCount == count;
+                            return ChoiceChip(
+                              label: Text('$count'),
+                              selected: selected,
+                              selectedColor: HeatColors.heatRed,
+                              labelStyle: TextStyle(
+                                color:
+                                    selected ? Colors.white : HeatColors.inkDark,
+                                fontWeight: FontWeight.w900,
+                              ),
+                              onSelected: (_) =>
+                                  setState(() => _playerCount = count),
+                            );
+                          }),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,

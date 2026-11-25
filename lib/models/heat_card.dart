@@ -142,10 +142,10 @@ List<HeatCard> createDeutschlandEngineHeat() {
   );
 }
 
-/// Réserve de cartes Stress en cas de tête-à-queue (Spin Out).
+/// Réserve de cartes Stress en cas de tête-à-queue (Spin Out, prévue jusqu'à 8 pilotes).
 List<HeatCard> createStressReserve() {
   return List.generate(
-    30,
+    45,
     (i) => HeatCard(
       id: 'reserve_stress_$i',
       type: HeatCardType.stress,

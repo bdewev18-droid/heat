@@ -5,9 +5,9 @@ import '../models/track_data.dart';
 import '../theme/heat_theme.dart';
 import 'heat_card_widget.dart';
 
-/// Plateaux compacts des 2 adversaires (même disposition que le joueur :
-/// Pioche, Moteur Heat, Défausse, Cartes jouées et Levier de vitesse 4→1,
-/// sans jamais révéler leur main secrète).
+/// Plateaux compacts des bots adverses (0 à 7 bots) :
+/// Pioche (cachée), Moteur Heat, Défausse (cliquable pour voir les cartes),
+/// Cartes jouées avec chiffres bien visibles, et Levier de vitesse vertical 4→1.
 class OpponentsPanel extends StatelessWidget {
   const OpponentsPanel({
     super.key,
@@ -19,6 +19,8 @@ class OpponentsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bots = controller.opponentStates;
+    if (bots.isEmpty) return const SizedBox.shrink();
+
     final activeDriverId = controller.activeTurnIndex >= 0 &&
             controller.activeTurnIndex < controller.turnOrderQueue.length
         ? controller.turnOrderQueue[controller.activeTurnIndex].racerId
@@ -34,17 +36,24 @@ class OpponentsPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
-              Icon(Icons.smart_toy_outlined, size: 15, color: HeatColors.navyHeader),
-              SizedBox(width: 6),
-              Text(
-                'TABLEAUX DE BORD ADVERSES (MAIN CACHÉE)',
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.8,
-                  color: HeatColors.navyHeader,
+              const Icon(
+                Icons.smart_toy_outlined,
+                size: 15,
+                color: HeatColors.navyHeader,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'ADVERSAIRES (${bots.length}) — DÉFAUSSE CONSULTABLE • MAIN & PIOCHE CACHÉES',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.7,
+                    color: HeatColors.navyHeader,
+                  ),
                 ),
               ),
             ],
@@ -52,35 +61,26 @@ class OpponentsPanel extends StatelessWidget {
           const SizedBox(height: 8),
           LayoutBuilder(
             builder: (context, constraints) {
-              final sideBySide = constraints.maxWidth >= 500;
-              if (sideBySide) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    for (var i = 0; i < bots.length; i++) ...[
-                      Expanded(
+              final twoCols = constraints.maxWidth >= 520;
+              final itemWidth = twoCols
+                  ? (constraints.maxWidth - 8) / 2
+                  : constraints.maxWidth;
+
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: bots
+                    .map(
+                      (bot) => SizedBox(
+                        width: itemWidth,
                         child: _CompactBotCockpit(
-                          bot: bots[i],
+                          bot: bot,
                           totalLaps: controller.totalLaps,
-                          isActive: activeDriverId == bots[i].id,
+                          isActive: activeDriverId == bot.id,
                         ),
                       ),
-                      if (i < bots.length - 1) const SizedBox(width: 8),
-                    ],
-                  ],
-                );
-              }
-              return Column(
-                children: [
-                  for (var i = 0; i < bots.length; i++) ...[
-                    _CompactBotCockpit(
-                      bot: bots[i],
-                      totalLaps: controller.totalLaps,
-                      isActive: activeDriverId == bots[i].id,
-                    ),
-                    if (i < bots.length - 1) const SizedBox(height: 8),
-                  ],
-                ],
+                    )
+                    .toList(),
               );
             },
           ),
@@ -107,6 +107,9 @@ class _CompactBotCockpit extends StatelessWidget {
         DeutschlandTrack.lapForProgress(bot.progress).clamp(1, totalLaps);
     final spaceNum = DeutschlandTrack.spaceForProgress(bot.progress).spaceNumber;
     final lowHeat = bot.engineHeatCount <= 1;
+    final cardsFormula = bot.revealedCardsThisRound.isEmpty
+        ? null
+        : '${bot.revealedCardsThisRound.map((c) => c.shortLabel).join(' + ')} = ${bot.turnSpeed}';
 
     return Container(
       decoration: BoxDecoration(
@@ -120,7 +123,7 @@ class _CompactBotCockpit extends StatelessWidget {
         ),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isActive ? HeatColors.heatGold : bot.color.withValues(alpha: 0.8),
+          color: isActive ? HeatColors.heatGold : bot.color.withValues(alpha: 0.85),
           width: isActive ? 2.2 : 1.3,
         ),
       ),
@@ -128,7 +131,6 @@ class _CompactBotCockpit extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Zone principale : en-tête + compteurs Pioche/Moteur/Défausse + Cartes jouées
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -169,9 +171,9 @@ class _CompactBotCockpit extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
 
-                // Ligne compacte Pioche / Moteur (Heat) / Défausse
+                // Ligne compacte Pioche (non consultable) / Moteur / Défausse (consultable !)
                 Wrap(
-                  spacing: 6,
+                  spacing: 5,
                   runSpacing: 4,
                   children: [
                     _MiniMetricPill(
@@ -187,35 +189,60 @@ class _CompactBotCockpit extends StatelessWidget {
                           : const Color(0xFFFFB74D),
                       emphasized: lowHeat,
                     ),
-                    _MiniMetricPill(
-                      icon: Icons.delete_outline,
-                      label:
-                          'Déf. ${bot.discardPileCount}${bot.topDiscardCard != null ? " (${bot.topDiscardCard!.shortLabel})" : ""}',
-                      color: Colors.white70,
+                    InkWell(
+                      onTap: () => showDiscardPileDialog(
+                        context,
+                        ownerName: bot.name,
+                        ownerColor: bot.color,
+                        cards: bot.discardPile,
+                      ),
+                      borderRadius: BorderRadius.circular(6),
+                      child: _MiniMetricPill(
+                        icon: Icons.visibility,
+                        label: 'Déf. ${bot.discardPileCount}',
+                        color: HeatColors.heatGold,
+                        clickable: true,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 7),
 
-                // Cartes jouées ce tour (face cachée avant tour, révélées après)
+                // Cartes jouées ce tour + formule numérique explicite
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Expanded(
                       child: bot.revealedCardsThisRound.isNotEmpty
-                          ? Wrap(
-                              spacing: 4,
-                              runSpacing: 4,
-                              children: bot.revealedCardsThisRound
-                                  .map(
-                                    (c) => HeatCardWidget(
-                                      card: c,
-                                      width: 40,
-                                      height: 56,
-                                      enabled: true,
+                          ? Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Wrap(
+                                  spacing: 4,
+                                  runSpacing: 4,
+                                  children: bot.revealedCardsThisRound
+                                      .map(
+                                        (c) => HeatCardWidget(
+                                          card: c,
+                                          width: 38,
+                                          height: 52,
+                                          enabled: true,
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                                if (cardsFormula != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Cartes : $cardsFormula',
+                                    style: const TextStyle(
+                                      color: HeatColors.heatGold,
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w900,
                                     ),
-                                  )
-                                  .toList(),
+                                  ),
+                                ],
+                              ],
                             )
                           : (bot.hiddenPlayedCount > 0
                               ? Wrap(
@@ -223,8 +250,8 @@ class _CompactBotCockpit extends StatelessWidget {
                                   children: List.generate(
                                     bot.hiddenPlayedCount,
                                     (_) => const HeatCardBackWidget(
-                                      width: 34,
-                                      height: 48,
+                                      width: 32,
+                                      height: 46,
                                     ),
                                   ),
                                 )
@@ -299,10 +326,10 @@ class _CompactBotCockpit extends StatelessWidget {
 
           const SizedBox(width: 8),
 
-          // Levier de vitesse vertical compact (4 → 1, même disposition que le joueur)
+          // Levier de vitesse vertical compact (4 → 1)
           Container(
-            width: 32,
-            padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 3),
+            width: 30,
+            padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
             decoration: BoxDecoration(
               color: const Color(0xFF0E1721),
               borderRadius: BorderRadius.circular(8),
@@ -325,9 +352,11 @@ class _CompactBotCockpit extends StatelessWidget {
                   return Container(
                     margin: const EdgeInsets.only(top: 2),
                     width: 24,
-                    height: 20,
+                    height: 19,
                     decoration: BoxDecoration(
-                      color: active ? bot.color : Colors.white.withValues(alpha: 0.06),
+                      color: active
+                          ? bot.color
+                          : Colors.white.withValues(alpha: 0.06),
                       borderRadius: BorderRadius.circular(5),
                       border: Border.all(
                         color: active ? HeatColors.heatGold : Colors.white12,
@@ -360,12 +389,14 @@ class _MiniMetricPill extends StatelessWidget {
     required this.label,
     required this.color,
     this.emphasized = false,
+    this.clickable = false,
   });
 
   final IconData icon;
   final String label;
   final Color color;
   final bool emphasized;
+  final bool clickable;
 
   @override
   Widget build(BuildContext context) {
@@ -374,10 +405,14 @@ class _MiniMetricPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: emphasized
             ? HeatColors.heatRed.withValues(alpha: 0.25)
-            : Colors.black.withValues(alpha: 0.28),
+            : (clickable
+                ? HeatColors.heatGold.withValues(alpha: 0.16)
+                : Colors.black.withValues(alpha: 0.28)),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: emphasized ? const Color(0xFFFF6E6E) : Colors.white12,
+          color: emphasized
+              ? const Color(0xFFFF6E6E)
+              : (clickable ? HeatColors.heatGold : Colors.white12),
         ),
       ),
       child: Row(

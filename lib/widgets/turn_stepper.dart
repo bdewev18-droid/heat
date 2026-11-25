@@ -44,6 +44,10 @@ class TurnStepperPanel extends StatelessWidget {
             const SizedBox(height: 8),
             _buildStepBadgesRow(step),
             const SizedBox(height: 8),
+            if (controller.canUndo || controller.canRestartRound) ...[
+              _buildUndoControlsBar(),
+              const SizedBox(height: 8),
+            ],
           ],
           if (controller.lastHeatNotice != null &&
               step != RoundStep.diceRoll) ...[
@@ -56,6 +60,44 @@ class TurnStepperPanel extends StatelessWidget {
           _buildActiveStepContent(context, step),
         ],
       ),
+    );
+  }
+
+  Widget _buildUndoControlsBar() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      children: [
+        OutlinedButton.icon(
+          onPressed: controller.canUndo ? controller.undoLastAction : null,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: HeatColors.navyHeader,
+            side: const BorderSide(color: HeatColors.navyHeader),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            visualDensity: VisualDensity.compact,
+          ),
+          icon: const Icon(Icons.undo_rounded, size: 16),
+          label: const Text(
+            'Annuler dernière action',
+            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+          ),
+        ),
+        OutlinedButton.icon(
+          onPressed:
+              controller.canRestartRound ? controller.restartCurrentRound : null,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: HeatColors.heatOrange,
+            side: const BorderSide(color: HeatColors.heatOrange),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            visualDensity: VisualDensity.compact,
+          ),
+          icon: const Icon(Icons.replay_rounded, size: 16),
+          label: Text(
+            'Recommencer manche #${controller.roundNumber}',
+            style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
     );
   }
 
@@ -405,19 +447,46 @@ class TurnStepperPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          // Cartes jouées / révélées par le bot ce tour
+          // Cartes jouées / révélées par le bot ce tour + chiffres explicites
           if (outcome.revealedCards.isNotEmpty) ...[
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                ...outcome.revealedCards.map(
-                  (c) => HeatCardWidget(
-                    card: c,
-                    width: 48,
-                    height: 68,
-                    enabled: true,
+                Expanded(
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      ...outcome.revealedCards.map(
+                        (c) => HeatCardWidget(
+                          card: c,
+                          width: 48,
+                          height: 68,
+                          enabled: true,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 9,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: HeatColors.navyHeader,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: HeatColors.heatGold, width: 1.3),
+                  ),
+                  child: Text(
+                    outcome.cardsFormula,
+                    style: const TextStyle(
+                      color: HeatColors.heatGold,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               ],
@@ -501,8 +570,8 @@ class TurnStepperPanel extends StatelessWidget {
         const SizedBox(height: 8),
         Text(
           rolled
-              ? 'Ordre de départ tiré au sort ! Celui qui est devant commence toujours la résolution.'
-              : 'Lance les dés pour déterminer qui part en Pole Position face aux 2 pilotes adverses (Bleu et Vert) !',
+              ? 'Ordre de départ tiré au sort (${controller.playerCount} pilotes) ! Celui qui est devant commence toujours la résolution.'
+              : 'Lance les dés pour déterminer qui part en Pole Position face aux ${controller.botCount} pilote(s) adverse(s) !',
           style: const TextStyle(fontSize: 12.5, color: HeatColors.inkDark),
         ),
         const SizedBox(height: 10),
@@ -699,7 +768,9 @@ class TurnStepperPanel extends StatelessWidget {
         Text(
           cluttered
               ? 'Main encombrée (p. 7) : sélectionne tes cartes jouables et complète avec des cartes Heat (vitesse remise en 1ère sans avancer).'
-              : 'Clique sur $needed carte(s) ci-dessous. Les 2 pilotes adverses jouent leurs cartes simultanément, puis le 1er démarre !',
+              : controller.botCount > 0
+                  ? 'Clique sur $needed carte(s) ci-dessous. Les ${controller.botCount} adversaire(s) jouent leurs cartes simultanément, puis le 1er démarre !'
+                  : 'Clique sur $needed carte(s) ci-dessous.',
           style: TextStyle(
             fontSize: 12.5,
             color: cluttered ? HeatColors.heatRed : HeatColors.inkMuted,
@@ -741,7 +812,7 @@ class TurnStepperPanel extends StatelessWidget {
         _buildMovementButtonsRow(
           onContinue: pending == 0 ? controller.proceedFromRevealAndMove : null,
           continueLabel: controller.adrenalineEligible
-              ? 'Étape 4 : Adrénaline (3e place !)'
+              ? 'Étape 4 : Adrénaline !'
               : 'Étape 5 : Réagir',
         ),
       ],

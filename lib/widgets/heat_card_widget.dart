@@ -81,6 +81,52 @@ class HeatCardWidget extends StatelessWidget {
   Widget _buildSpeedOverlay({required bool isBasic}) {
     final value = '${card.speedValue ?? 0}';
     final compact = width < 64;
+    final mini = width <= 54;
+
+    if (mini) {
+      return Stack(
+        children: [
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: HeatColors.navyHeader.withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isBasic ? Colors.white : HeatColors.heatGold,
+                  width: 1.4,
+                ),
+              ),
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: (width * 0.48).clamp(16.0, 24.0),
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                  height: 1.05,
+                ),
+              ),
+            ),
+          ),
+          if (!isBasic)
+            const Positioned(
+              bottom: 2,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Text(
+                  'UPG',
+                  style: TextStyle(
+                    fontSize: 7,
+                    fontWeight: FontWeight.w900,
+                    color: HeatColors.heatGold,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
 
     return Stack(
       children: [
@@ -159,6 +205,28 @@ class HeatCardWidget extends StatelessWidget {
 
   Widget _buildStressOverlay() {
     final compact = width < 64;
+    final mini = width <= 54;
+    if (mini) {
+      return Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: HeatColors.stressPurple.withValues(alpha: 0.95),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white, width: 1.3),
+          ),
+          child: Text(
+            '+',
+            style: TextStyle(
+              fontSize: (width * 0.48).clamp(16.0, 22.0),
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+              height: 1.0,
+            ),
+          ),
+        ),
+      );
+    }
     return Stack(
       children: [
         Positioned(
@@ -681,4 +749,131 @@ class _CheckeredBackPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Ouvre une fenêtre affichant toutes les cartes présentes dans une défausse
+/// (la pioche et la main adverse restent strictement cachées).
+Future<void> showDiscardPileDialog(
+  BuildContext context, {
+  required String ownerName,
+  required Color ownerColor,
+  required List<HeatCard> cards,
+}) async {
+  // Compte récapitulatif par type / valeur
+  final counts = <String, int>{};
+  for (final c in cards) {
+    final key = c.displayName;
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+
+  await showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: HeatColors.paperCard,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: ownerColor, width: 2),
+      ),
+      title: Row(
+        children: [
+          CircleAvatar(
+            radius: 10,
+            backgroundColor: ownerColor,
+            child: const Icon(
+              Icons.delete_outline,
+              size: 13,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Défausse — $ownerName (${cards.length})',
+              style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+                color: HeatColors.navyHeader,
+              ),
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: 420,
+        child: cards.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  'La défausse est actuellement vide.',
+                  style: TextStyle(color: HeatColors.inkMuted),
+                ),
+              )
+            : SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: counts.entries
+                          .map(
+                            (e) => Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: HeatColors.paperCream,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: HeatColors.paperBorder),
+                              ),
+                              child: Text(
+                                '${e.value}× ${e.key}',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: HeatColors.navyHeader,
+                                ),
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Cartes (de la plus récente à la plus ancienne) :',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: HeatColors.inkMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 8,
+                      children: cards.reversed
+                          .map(
+                            (c) => HeatCardWidget(
+                              card: c,
+                              width: 58,
+                              height: 84,
+                              enabled: true,
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+      actions: [
+        ElevatedButton(
+          onPressed: () => Navigator.of(ctx).pop(),
+          child: const Text('Fermer'),
+        ),
+      ],
+    ),
+  );
 }

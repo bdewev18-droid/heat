@@ -19,7 +19,7 @@ class PlayerDashboard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _buildCockpitMat(),
+        _buildCockpitMat(context),
         if (controller.playArea.isNotEmpty) ...[
           const SizedBox(height: 10),
           _buildPlayArea(),
@@ -32,7 +32,7 @@ class PlayerDashboard extends StatelessWidget {
     );
   }
 
-  Widget _buildCockpitMat() {
+  Widget _buildCockpitMat(BuildContext context) {
     final topDiscard =
         controller.discardPile.isEmpty ? null : controller.discardPile.last;
     final topEngine =
@@ -180,40 +180,64 @@ class PlayerDashboard extends StatelessWidget {
                   ],
                 ),
 
-                // Défausse (seule la carte du dessus est visible - règle p. 6)
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'DÉFAUSSE (${controller.discardPile.length})',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1,
-                        color: Colors.white70,
+                // Défausse cliquable pour consulter les cartes défaussées
+                InkWell(
+                  onTap: () => showDiscardPileDialog(
+                    context,
+                    ownerName: 'Toi (Rouge)',
+                    ownerColor: HeatColors.heatRed,
+                    cards: controller.discardPile,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'DÉFAUSSE (${controller.discardPile.length})',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1,
+                          color: Colors.white70,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 5),
-                    if (topDiscard != null)
-                      HeatCardWidget(
-                        card: topDiscard,
-                        width: 62,
-                        height: 88,
-                        enabled: true,
-                      )
-                    else
-                      const _EmptySlotBox(
-                        width: 62,
-                        height: 88,
-                        icon: Icons.delete_outline,
-                        label: 'Vide',
+                      const SizedBox(height: 5),
+                      if (topDiscard != null)
+                        HeatCardWidget(
+                          card: topDiscard,
+                          width: 62,
+                          height: 88,
+                          enabled: true,
+                        )
+                      else
+                        const _EmptySlotBox(
+                          width: 62,
+                          height: 88,
+                          icon: Icons.delete_outline,
+                          label: 'Vide',
+                        ),
+                      const SizedBox(height: 4),
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.visibility,
+                            size: 12,
+                            color: HeatColors.heatGold,
+                          ),
+                          SizedBox(width: 3),
+                          Text(
+                            'Voir défausse',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: HeatColors.heatGold,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
                       ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Dessus visible',
-                      style: TextStyle(fontSize: 10, color: Colors.white54),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -715,19 +739,33 @@ class _RecapEntryCard extends StatelessWidget {
           ),
           if (entry.cards.isNotEmpty) ...[
             const SizedBox(height: 6),
-            Wrap(
-              spacing: 5,
-              runSpacing: 5,
-              children: entry.cards
-                  .map(
-                    (c) => HeatCardWidget(
-                      card: c,
-                      width: 38,
-                      height: 54,
-                      enabled: true,
-                    ),
-                  )
-                  .toList(),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Wrap(
+                    spacing: 5,
+                    runSpacing: 5,
+                    children: entry.cards
+                        .map(
+                          (c) => HeatCardWidget(
+                            card: c,
+                            width: 38,
+                            height: 54,
+                            enabled: true,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                _RecapBadge(
+                  text: entry.cardsFormula,
+                  bg: HeatColors.navyHeader.withValues(alpha: 0.1),
+                  fg: HeatColors.navyHeader,
+                  border: HeatColors.navyHeader.withValues(alpha: 0.3),
+                ),
+              ],
             ),
           ],
           if (entry.details.isNotEmpty) ...[

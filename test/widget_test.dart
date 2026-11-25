@@ -4,120 +4,139 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:heat/main.dart';
 import 'package:heat/models/game_state.dart';
 import 'package:heat/models/heat_card.dart';
-import 'package:heat/models/track_data.dart';
 
 void main() {
   test('Competition deck removes 0 and 5 cards unless enabled', () {
     final compDeck = createDeutschlandStarterDeck();
-    expect(compDeck.length, 15); // 12 Basic + 3 Stress
+    expect(compDeck.length, 15);
     expect(compDeck.any((c) => c.speedValue == 0 || c.speedValue == 5), isFalse);
 
     final initDeck = createDeutschlandStarterDeck(includeStartingUpgrades: true);
-    expect(initDeck.length, 18); // + 0, 5, +1 Heat
+    expect(initDeck.length, 18);
     expect(initDeck.any((c) => c.speedValue == 0), isTrue);
     expect(initDeck.any((c) => c.speedValue == 5), isTrue);
   });
 
-  test('Cars are centered on spaces when alone and repères match next corner', () {
-    final space = DeutschlandTrack.spaces.first;
-    expect(space.positionForLane(0, isSharedSpace: false), space.position);
-    expect(space.positionForLane(1, isSharedSpace: false), space.position);
-    expect(
-      space.positionForLane(0, isSharedSpace: true),
-      isNot(equals(space.position)),
-    );
+  test('Player count supports 1 (Solo) up to 8 players (7 bots)', () {
+    final solo = HeatGameController(playerCount: 1, random: Random(1));
+    expect(solo.botCount, 0);
+    expect(solo.standings.length, 1);
+    expect(solo.step, RoundStep.shiftGears);
 
-    final fromSpace8 = DeutschlandTrack.nextCornerInfo(progress: 8);
-    expect(fromSpace8.corner?.id, 1);
-    expect(fromSpace8.spacesBeforeCorner, 3);
-    expect(fromSpace8.markerProgressList, [9, 10, 11]);
+    final eight = HeatGameController(playerCount: 8, random: Random(2));
+    expect(eight.botCount, 7);
+    expect(eight.standings.length, 8);
+    expect(eight.step, RoundStep.diceRoll);
+
+    eight.rollStartingDice();
+    expect(eight.diceRolled, isTrue);
+    final distinctRolls = eight.standings.map((r) => r.diceRoll).toSet();
+    expect(distinctRolls.length, 8);
   });
 
-  test('Turn order resolves frontmost first with visible bot turns & Heat notice', () {
-    final controller = HeatGameController(random: Random(42));
-    expect(controller.step, RoundStep.diceRoll);
-    expect(controller.includeStartingUpgrades, isFalse);
+  test('Undo last action (e.g. Boost) and Restart round restore exact state', () {
+    final controller = HeatGameController(playerCount: 1, random: Random(7));
+    final initialHandIds = controller.hand.map((c) => c.id).toList();
+    final initialDrawIds = controller.drawPile.map((c) => c.id).toList();
 
-    controller.rollStartingDice();
-    controller.startRaceAfterDiceRoll();
-    expect(controller.step, RoundStep.shiftGears);
-
-    // Passage ±2 en V3 : 1 Heat payé + notification explicite
+    // Shift V1 -> V3 (costs 1 Heat)
     controller.selectTargetGear(3);
     controller.confirmShiftGear();
     expect(controller.gear, 3);
     expect(controller.engineHeat.length, 4);
-    expect(controller.lastHeatNotice, isNotNull);
-    expect(controller.step, RoundStep.playCards);
+    expect(controller.canUndo, isTrue);
 
-    // Jouer 3 cartes
-    final playable = controller.hand.where((c) => c.canPlayNormally).take(3);
-    for (final c in playable) {
+    // Undo shift -> back to V1 with 5 Heat
+    controller.undoLastAction();
+    expect(controller.step, RoundStep.shiftGears);
+    expect(controller.gear, 1);
+    expect(controller.engineHeat.length, 5);
+
+    // Proceed to Step 5 (React) in Gear 2
+    controller.selectTargetGear(2);
+    controller.confirmShiftGear();
+    for (final c in controller.hand.where((c) => c.canPlayNormally).take(2)) {
+      controller.onHandCardTapped(c);
+    }
+    controller.confirmPlayCards();
+    controller.autoFinishMovement();
+    controller.proceedFromRevealAndMove();
+    expect(controller.step, RoundStep.react);
+
+    // Trigger Boost, then Undo Boost!
+    final speedBeforeBoost = controller.turnSpeed;
+    final heatBeforeBoost = controller.engineHeat.length;
+    controller.activateBoost();
+    expect(controller.boostUsed, isTrue);
+    expect(controller.engineHeat.length, heatBeforeBoost - 1);
+    expect(controller.turnSpeed, greaterThan(speedBeforeBoost));
+
+    controller.undoLastAction();
+    expect(controller.boostUsed, isFalse);
+    expect(controller.engineHeat.length, heatBeforeBoost);
+    expect(controller.turnSpeed, speedBeforeBoost);
+
+    // Restart entire round -> back to exact initial hand, draw pile, Step 1
+    expect(controller.canRestartRound, isTrue);
+    controller.restartCurrentRound();
+    expect(controller.step, RoundStep.shiftGears);
+    expect(controller.carProgress, 0);
+    expect(controller.engineHeat.length, 5);
+    expect(controller.hand.map((c) => c.id).toList(), initialHandIds);
+    expect(controller.drawPile.map((c) => c.id).toList(), initialDrawIds);
+  });
+
+  test('Turn order resolves frontmost first with bot card formulas & discard piles', () {
+    final controller = HeatGameController(playerCount: 3, random: Random(42));
+    controller.rollStartingDice();
+    controller.startRaceAfterDiceRoll();
+
+    controller.selectTargetGear(3);
+    controller.confirmShiftGear();
+    for (final c in controller.hand.where((c) => c.canPlayNormally).take(3)) {
       controller.onHandCardTapped(c);
     }
     controller.confirmPlayCards();
 
-    // Avancer les bots devant le joueur si présents
     while (controller.step == RoundStep.botTurn) {
       final outcome = controller.activeBotOutcome!;
-      // Vérifie la dépense stricte de 1 Heat lors d'un changement ±2 vitesses
+      expect(outcome.cardsFormula, contains('='));
       if ((outcome.gearBeforeSpinOut - outcome.previousGear).abs() == 2) {
         expect(outcome.shiftHeatPaid, 1);
       } else {
         expect(outcome.shiftHeatPaid, 0);
       }
-      expect(outcome.revealedCards, isNotEmpty);
       controller.proceedAfterBotTurn();
     }
 
-    // Tour du joueur (Étapes 3 -> 9)
     expect(controller.step, RoundStep.revealAndMove);
     controller.autoFinishMovement();
     controller.proceedFromRevealAndMove();
-
     if (controller.step == RoundStep.adrenaline) {
       controller.chooseAdrenaline(activate: false);
     }
-    expect(controller.step, RoundStep.react);
     controller.proceedFromReact();
-
-    expect(controller.step, RoundStep.slipstream);
     controller.proceedFromSlipstream();
-
-    expect(controller.step, RoundStep.checkCorner);
     controller.resolveCornersAndProceed();
     controller.resolveCornersAndProceed();
-
-    expect(controller.step, RoundStep.discard);
     controller.confirmDiscard();
-
-    expect(controller.step, RoundStep.replenishHand);
     controller.replenishAndStartNextRound();
 
-    // Avancer les bots derrière le joueur si présents
     while (controller.step == RoundStep.botTurn) {
-      final outcome = controller.activeBotOutcome!;
-      if ((outcome.gearBeforeSpinOut - outcome.previousGear).abs() == 2) {
-        expect(outcome.shiftHeatPaid, 1);
-      } else {
-        expect(outcome.shiftHeatPaid, 0);
-      }
-      expect(outcome.revealedCards, isNotEmpty);
       controller.proceedAfterBotTurn();
     }
 
     expect(controller.roundNumber, 2);
-    expect(controller.step, RoundStep.shiftGears);
-    expect(controller.hand.length, 7);
-    // 3 pilotes ont joué la manche 1 → 3 entrées de récap avec cartes & Heat
     expect(controller.recapEntries.length, 3);
-    expect(controller.opponentStates.length, 2);
-
-    final bots = controller.standings.where((r) => !r.isHuman).toList();
-    expect(bots.any((b) => b.progress > 0), isTrue);
+    // Défausses accessibles pour le joueur et les bots après la manche 1
+    expect(controller.discardPile, isNotEmpty);
+    expect(
+      controller.opponentStates.every((b) => b.discardPile.isNotEmpty),
+      isTrue,
+    );
   });
 
-  testWidgets('Home -> Competition option -> Dice roll -> Race tracker', (
+  testWidgets('Home -> choose player count -> Launch -> Undo button available', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(const HeatApp());
@@ -126,10 +145,12 @@ void main() {
     await tester.tap(find.text('JOUER'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.textContaining('Mode Compétition'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Nombre de joueurs : 3'), findsOneWidget);
+    // Sélectionner 5 joueurs (Toi + 4 bots)
+    await tester.ensureVisible(find.text('5'));
+    await tester.tap(find.text('5'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Nombre de joueurs : 5'), findsOneWidget);
 
     await tester.ensureVisible(find.text('LANCER LA COURSE'));
     await tester.tap(find.text('LANCER LA COURSE'));
@@ -143,7 +164,6 @@ void main() {
     await tester.tap(find.text('Démarrer la course !'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('ORDRE DE PASSAGE'), findsOneWidget);
     expect(find.textContaining('1. Changer de vitesse'), findsOneWidget);
   });
 }

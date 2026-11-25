@@ -1,6 +1,6 @@
 {
-  "version": "1.5.0",
-  "buildNumber": 6,
+  "version": "1.6.0",
+  "buildNumber": 7,
   "apkUrl": "https://github.com/bdewev18-droid/heat/releases/latest/download/app-release.apk",
-  "releaseNotes": "v1.5.0 (Build 6) : Signature Android persistante pour mises à jour sans conflit, tableaux de bord compacts des 2 adversaires, récap des actions avec cartes et Heat restant/dépensé/manquant."
+  "releaseNotes": "v1.6.0 (Build 7) : Choix de 1 à 8 joueurs (0 à 7 bots), chiffres lisibles + formule des cartes des bots, consultation des défausses (toi + bots), annulation de la dernière action et bouton Recommencer le tour."
 }

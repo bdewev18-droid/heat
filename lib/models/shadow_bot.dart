@@ -22,6 +22,7 @@ class RacerTrackState {
     this.engineHeatCount = 5,
     this.drawPileCount = 0,
     this.discardPileCount = 0,
+    this.discardPile = const [],
     this.topDiscardCard,
     this.revealedCardsThisRound = const [],
     this.hiddenPlayedCount = 0,
@@ -48,6 +49,7 @@ class RacerTrackState {
   int engineHeatCount;
   int drawPileCount;
   int discardPileCount;
+  List<HeatCard> discardPile;
   HeatCard? topDiscardCard;
 
   /// Cartes révélées sur ce tour (visibles après résolution du pilote).
@@ -127,6 +129,92 @@ class BotTurnOutcome {
   final String summary;
 
   int get totalHeatSpent => shiftHeatPaid + boostHeatPaid + cornerHeatPaid;
+
+  /// Formule lisible des chiffres des cartes jouées (ex: "3 + 4 = 7").
+  String get cardsFormula {
+    if (revealedCards.isEmpty) return 'Aucune carte';
+    final parts = revealedCards.map((c) => c.shortLabel).join(' + ');
+    return '$parts = $speed';
+  }
+}
+
+/// Instantané complet de l'état d'un bot (utilisé pour Annuler / Recommencer le tour).
+class ShadowBotSnapshot {
+  const ShadowBotSnapshot({
+    required this.progress,
+    required this.lane,
+    required this.diceRoll,
+    required this.finished,
+    required this.finishRank,
+    required this.gear,
+    required this.previousGear,
+    required this.shiftHeatPaidThisRound,
+    required this.roundStartProgress,
+    required this.plannedCluttered,
+    required this.drawPile,
+    required this.hand,
+    required this.playArea,
+    required this.discardPile,
+    required this.engineHeat,
+    required this.lastRevealedCards,
+    required this.lastTurnSpeed,
+    required this.lastHeatSpent,
+    required this.lastHeatMissing,
+    required this.lastCooledHeat,
+    required this.lastSpunOut,
+  });
+
+  final int progress;
+  final int lane;
+  final int diceRoll;
+  final bool finished;
+  final int? finishRank;
+  final int gear;
+  final int previousGear;
+  final int shiftHeatPaidThisRound;
+  final int roundStartProgress;
+  final bool plannedCluttered;
+  final List<HeatCard> drawPile;
+  final List<HeatCard> hand;
+  final List<HeatCard> playArea;
+  final List<HeatCard> discardPile;
+  final List<HeatCard> engineHeat;
+  final List<HeatCard> lastRevealedCards;
+  final int lastTurnSpeed;
+  final int lastHeatSpent;
+  final int lastHeatMissing;
+  final int lastCooledHeat;
+  final bool lastSpunOut;
+}
+
+/// Crée entre 0 et 7 bots adverses aux couleurs et styles distincts.
+List<ShadowBot> createOpponentBots({
+  required int botCount,
+  required Random random,
+  required bool includeStartingUpgrades,
+}) {
+  const profiles = <({String id, String name, Color color, double aggr})>[
+    (id: 'bot_blue', name: 'Pilote Bleu', color: Color(0xFF1565C0), aggr: 0.65),
+    (id: 'bot_green', name: 'Pilote Vert', color: Color(0xFF2E7D32), aggr: 0.40),
+    (id: 'bot_yellow', name: 'Pilote Jaune', color: Color(0xFFC79100), aggr: 0.55),
+    (id: 'bot_purple', name: 'Pilote Violet', color: Color(0xFF7B1FA2), aggr: 0.72),
+    (id: 'bot_black', name: 'Pilote Noir', color: Color(0xFF37474F), aggr: 0.35),
+    (id: 'bot_orange', name: 'Pilote Orange', color: Color(0xFFE65100), aggr: 0.80),
+    (id: 'bot_silver', name: 'Pilote Argent', color: Color(0xFF546E7A), aggr: 0.50),
+  ];
+
+  final clamped = botCount.clamp(0, profiles.length);
+  return [
+    for (var i = 0; i < clamped; i++)
+      ShadowBot(
+        id: profiles[i].id,
+        name: profiles[i].name,
+        color: profiles[i].color,
+        aggressiveness: profiles[i].aggr,
+        random: random,
+        includeStartingUpgrades: includeStartingUpgrades,
+      ),
+  ];
 }
 
 /// Pilote adverse contrôlé par le jeu : possède son propre paquet réel, son
@@ -180,6 +268,54 @@ class ShadowBot {
   int get gear => _gear;
   int get engineHeatCount => _engineHeat.length;
 
+  ShadowBotSnapshot captureSnapshot() => ShadowBotSnapshot(
+        progress: progress,
+        lane: lane,
+        diceRoll: diceRoll,
+        finished: finished,
+        finishRank: finishRank,
+        gear: _gear,
+        previousGear: _previousGear,
+        shiftHeatPaidThisRound: _shiftHeatPaidThisRound,
+        roundStartProgress: _roundStartProgress,
+        plannedCluttered: _plannedCluttered,
+        drawPile: List<HeatCard>.from(_drawPile),
+        hand: List<HeatCard>.from(_hand),
+        playArea: List<HeatCard>.from(_playArea),
+        discardPile: List<HeatCard>.from(_discardPile),
+        engineHeat: List<HeatCard>.from(_engineHeat),
+        lastRevealedCards: List<HeatCard>.from(_lastRevealedCards),
+        lastTurnSpeed: _lastTurnSpeed,
+        lastHeatSpent: _lastHeatSpent,
+        lastHeatMissing: _lastHeatMissing,
+        lastCooledHeat: _lastCooledHeat,
+        lastSpunOut: _lastSpunOut,
+      );
+
+  void restoreSnapshot(ShadowBotSnapshot s) {
+    progress = s.progress;
+    lane = s.lane;
+    diceRoll = s.diceRoll;
+    finished = s.finished;
+    finishRank = s.finishRank;
+    _gear = s.gear;
+    _previousGear = s.previousGear;
+    _shiftHeatPaidThisRound = s.shiftHeatPaidThisRound;
+    _roundStartProgress = s.roundStartProgress;
+    _plannedCluttered = s.plannedCluttered;
+    _drawPile = List<HeatCard>.from(s.drawPile);
+    _hand = List<HeatCard>.from(s.hand);
+    _playArea = List<HeatCard>.from(s.playArea);
+    _discardPile = List<HeatCard>.from(s.discardPile);
+    _engineHeat = List<HeatCard>.from(s.engineHeat);
+    _lastRevealedCards = List<HeatCard>.from(s.lastRevealedCards);
+    _lastTurnSpeed = s.lastTurnSpeed;
+    _lastHeatSpent = s.lastHeatSpent;
+    _lastHeatMissing = s.lastHeatMissing;
+    _lastCooledHeat = s.lastCooledHeat;
+    _lastSpunOut = s.lastSpunOut;
+  }
+
   RacerTrackState toTrackState() => RacerTrackState(
         id: id,
         name: name,
@@ -194,6 +330,7 @@ class ShadowBot {
         engineHeatCount: _engineHeat.length,
         drawPileCount: _drawPile.length,
         discardPileCount: _discardPile.length,
+        discardPile: List.unmodifiable(_discardPile),
         topDiscardCard: _discardPile.isEmpty ? null : _discardPile.last,
         revealedCardsThisRound: List.unmodifiable(_lastRevealedCards),
         hiddenPlayedCount: _playArea.length,

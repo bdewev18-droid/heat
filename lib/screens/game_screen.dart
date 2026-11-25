@@ -19,10 +19,12 @@ class GameScreen extends StatefulWidget {
     super.key,
     this.totalLaps = DeutschlandTrack.defaultLaps,
     this.includeStartingUpgrades = false,
+    this.playerCount = 3,
   });
 
   final int totalLaps;
   final bool includeStartingUpgrades;
+  final int playerCount;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -39,6 +41,7 @@ class _GameScreenState extends State<GameScreen> {
     _controller = HeatGameController(
       totalLaps: widget.totalLaps,
       includeStartingUpgrades: widget.includeStartingUpgrades,
+      playerCount: widget.playerCount,
     );
   }
 
@@ -159,6 +162,15 @@ class _GameScreenState extends State<GameScreen> {
                     ),
                     label: const Text('Repères'),
                   ),
+                  if (_controller.canUndo)
+                    IconButton(
+                      tooltip: 'Annuler la dernière action',
+                      onPressed: _controller.undoLastAction,
+                      icon: const Icon(
+                        Icons.undo_rounded,
+                        color: HeatColors.heatGold,
+                      ),
+                    ),
                   IconButton(
                     tooltip: 'Aide-mémoire des règles',
                     onPressed: _showRulesDialog,

@@ -1,6 +1,6 @@
 {
-  "version": "1.6.0",
-  "buildNumber": 7,
+  "version": "1.7.0",
+  "buildNumber": 8,
   "apkUrl": "https://github.com/bdewev18-droid/heat/releases/latest/download/app-release.apk",
-  "releaseNotes": "v1.6.0 (Build 7) : Choix de 1 à 8 joueurs (0 à 7 bots), chiffres lisibles + formule des cartes des bots, consultation des défausses (toi + bots), annulation de la dernière action et bouton Recommencer le tour."
+  "releaseNotes": "v1.7.0 (Build 8) : Green Hornet (voiture verte), position de départ fixe ou aléatoire sur l'écran circuit (suppression du jet de dés en jeu), Historique & Records locaux sur la HP, et Carte Bonus Blanche (vitesse 1, -1 Heat, +3 Aspiration)."
 }

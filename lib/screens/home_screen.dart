@@ -1,13 +1,20 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../models/game_state.dart';
+import '../models/heat_card.dart';
 import '../models/track_data.dart';
 import '../services/app_update_service.dart';
+import '../services/race_history_service.dart';
 import '../theme/heat_theme.dart';
+import '../widgets/heat_card_widget.dart';
 import 'game_screen.dart';
+import 'history_screen.dart';
 
 /// Page d'accueil (HP) reprenant la charte graphique du livret PDF :
-/// Icône + Logo HEAT, gestion de mise à jour APK, bouton JOUER, puis sélection
-/// du circuit (Allemagne uniquement).
+/// - Icône + Logo HEAT + Badge pilote Green Hornet (Vert)
+/// - Option Cartes Bonus (Deckbuild : carte blanche vit. 1, -1 Heat, +3 Asp.)
+/// - Accès Historique & Records locaux
+/// - Bouton JOUER → choix du circuit (Allemagne), nb joueurs, position fixe/aléatoire
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -20,14 +27,29 @@ class _HomeScreenState extends State<HomeScreen> {
   int _selectedLaps = DeutschlandTrack.defaultLaps;
   int _playerCount = 3;
   bool _includeStartingUpgrades = false;
+  bool _includeBonusCards = false;
+
+  // Position sur la grille : Aléatoire ou Fixe (1.._playerCount)
+  bool _randomStartPosition = true;
+  int _fixedStartPosition = 5;
 
   RemoteAppVersion? _pendingUpdate;
   bool _isCheckingUpdate = false;
+  RaceHistorySummary? _historySummary;
 
   @override
   void initState() {
     super.initState();
     _checkLaunchUpdate();
+    _loadHistorySummary();
+  }
+
+  Future<void> _loadHistorySummary() async {
+    final records = await RaceHistoryService.loadHistory();
+    if (!mounted) return;
+    setState(() {
+      _historySummary = RaceHistoryService.computeSummary(records);
+    });
   }
 
   Future<void> _checkLaunchUpdate() async {
@@ -42,15 +64,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _startDeutschlandRace() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => GameScreen(
-          totalLaps: _selectedLaps,
-          includeStartingUpgrades: _includeStartingUpgrades,
-          playerCount: _playerCount,
-        ),
-      ),
-    );
+    final effectiveFixed = _randomStartPosition
+        ? null
+        : _fixedStartPosition.clamp(1, _playerCount);
+
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => GameScreen(
+              totalLaps: _selectedLaps,
+              includeStartingUpgrades: _includeStartingUpgrades,
+              includeBonusCards: _includeBonusCards,
+              playerCount: _playerCount,
+              fixedStartPosition: effectiveFixed,
+            ),
+          ),
+        )
+        .then((_) => _loadHistorySummary());
+  }
+
+  void _openHistory() {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const HistoryScreen()))
+        .then((_) => _loadHistorySummary());
   }
 
   @override
@@ -85,14 +121,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildHeroHomeView() {
+    final summary = _historySummary;
+    final hasRaces = summary != null && summary.totalRaces > 0;
+
     return Column(
       key: const ValueKey('hero'),
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Emblème / Icône du jeu
         Container(
-          width: 96,
-          height: 96,
+          width: 92,
+          height: 92,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(color: HeatColors.heatGold, width: 3),
@@ -110,21 +148,49 @@ class _HomeScreenState extends State<HomeScreen> {
             fit: BoxFit.cover,
           ),
         ),
-        const SizedBox(height: 12),
-        const HeatLogoWidget(scale: 0.98),
-        const SizedBox(height: 20),
+        const SizedBox(height: 10),
+        const HeatLogoWidget(scale: 0.94),
+        const SizedBox(height: 14),
 
+        // Badge Pilote Green Hornet
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: HeatColors.trackGreen,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: HeatColors.heatGold, width: 1.8),
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.directions_car, color: Colors.white, size: 17),
+              SizedBox(width: 7),
+              Text(
+                'PILOTE : ${HeatGameController.playerDisplayName} (VERT)',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12.5,
+                  letterSpacing: 0.8,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Encart principal HP + Option Cartes Bonus Deckbuild
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
           decoration: BoxDecoration(
             color: HeatColors.paperCard.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: HeatColors.heatGold, width: 2.5),
+            border: Border.all(color: HeatColors.heatGold, width: 2.2),
             boxShadow: [
               BoxShadow(
-                color: HeatColors.navyHeader.withValues(alpha: 0.18),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
+                color: HeatColors.navyHeader.withValues(alpha: 0.16),
+                blurRadius: 14,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
@@ -134,73 +200,152 @@ class _HomeScreenState extends State<HomeScreen> {
                 'METS LE PIED AU PLANCHER !',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 17,
+                  fontSize: 16.5,
                   fontWeight: FontWeight.w900,
                   fontStyle: FontStyle.italic,
                   color: HeatColors.heatRed,
                   letterSpacing: 1.0,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               const Text(
-                'Affronte 2 pilotes adverses en mode Shadow (vrais paquets, aucune triche) '
-                'selon les 9 étapes officielles : jet de dés de départ, boîte de vitesses, '
-                'cartes Stress & Heat, aspiration et gestion des virages.',
+                'Entraîne-toi sur Deutschland de 1 à 8 pilotes selon les règles officielles.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 13.5,
-                  height: 1.45,
+                  fontSize: 13,
                   color: HeatColors.inkDark,
                 ),
               ),
-              const SizedBox(height: 14),
-              const Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: [
-                  _InfoPill(icon: Icons.smart_toy, text: '2 Bots Shadow'),
-                  _InfoPill(icon: Icons.casino, text: 'Jet de dés'),
-                  _InfoPill(icon: Icons.flag, text: 'Allemagne'),
-                ],
+              const SizedBox(height: 12),
+
+              // Option HP : Cartes Bonus issues du deckbuild
+              Material(
+                color: HeatColors.paperCream,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(
+                    color: _includeBonusCards
+                        ? HeatColors.trackGreen
+                        : HeatColors.paperBorder,
+                    width: _includeBonusCards ? 1.8 : 1.0,
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    children: [
+                      HeatCardWidget(
+                        card: createWhiteSlipstreamBonusCard(),
+                        width: 46,
+                        height: 64,
+                        enabled: true,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          dense: true,
+                          activeThumbColor: HeatColors.trackGreen,
+                          title: const Text(
+                            'Cartes Bonus (Deckbuild)',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w900,
+                              color: HeatColors.navyHeader,
+                            ),
+                          ),
+                          subtitle: const Text(
+                            'Ajoute ta Carte Blanche : Vitesse 1, coûte 1 Heat, +3 Aspiration (en plus des +2).',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: HeatColors.inkMuted,
+                            ),
+                          ),
+                          value: _includeBonusCards,
+                          onChanged: (v) =>
+                              setState(() => _includeBonusCards = v),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
         ),
 
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
 
-        SizedBox(
-          width: 260,
-          height: 56,
-          child: ElevatedButton.icon(
-            onPressed: () {
-              setState(() {
-                _showTrackSelection = true;
-              });
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: HeatColors.heatRed,
-              foregroundColor: Colors.white,
-              elevation: 6,
-              side: const BorderSide(color: HeatColors.heatGold, width: 2),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        // Boutons JOUER + HISTORIQUE
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          alignment: WrapAlignment.center,
+          children: [
+            SizedBox(
+              width: 230,
+              height: 54,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _showTrackSelection = true;
+                  });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: HeatColors.heatRed,
+                  foregroundColor: Colors.white,
+                  elevation: 6,
+                  side: const BorderSide(color: HeatColors.heatGold, width: 2),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                icon: const Icon(Icons.play_arrow_rounded, size: 28),
+                label: const Text(
+                  'JOUER',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 2.5,
+                  ),
+                ),
               ),
             ),
-            icon: const Icon(Icons.play_arrow_rounded, size: 30),
-            label: const Text(
-              'JOUER',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 3,
+            SizedBox(
+              height: 54,
+              child: OutlinedButton.icon(
+                onPressed: _openHistory,
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: HeatColors.paperCard,
+                  foregroundColor: HeatColors.navyHeader,
+                  side: const BorderSide(
+                    color: HeatColors.navyHeader,
+                    width: 2,
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                icon: const Icon(Icons.emoji_events, color: HeatColors.heatOrange),
+                label: Text(
+                  hasRaces
+                      ? 'HISTORIQUE (${summary.totalRaces} • Top3: ${summary.top3Count})'
+                      : 'HISTORIQUE & RECORDS',
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
             ),
-          ),
+          ],
         ),
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 18),
         _buildUpdateStatusBar(),
       ],
     );
@@ -285,6 +430,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildTrackSelectionView() {
+    final clampedFixed = _fixedStartPosition.clamp(1, _playerCount);
+
     return Column(
       key: const ValueKey('tracks'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -306,7 +453,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 16),
         Container(
           decoration: BoxDecoration(
             color: HeatColors.paperCard,
@@ -367,27 +514,29 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Wrap(
+                    Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
-                        _TrackStatChip(label: '62 cases'),
-                        _TrackStatChip(
+                        const _TrackStatChip(label: '62 cases'),
+                        const _TrackStatChip(
                           label: '6 virages (5 • 2 • 2 • 6 • 4 • 4)',
                         ),
-                        _TrackStatChip(label: '5 Heat moteur'),
-                        _TrackStatChip(label: '3 Stress départ'),
-                        _TrackStatChip(label: '1 à 8 joueurs (0–7 bots)'),
+                        const _TrackStatChip(label: '5 Heat moteur'),
+                        const _TrackStatChip(label: '3 Stress départ'),
+                        if (_includeBonusCards)
+                          const _TrackStatChip(label: 'Carte Bonus Blanche activée'),
                       ],
                     ),
                     const SizedBox(height: 14),
-                    // Choix du nombre de joueurs (1 à 8, max 7 bots)
+
+                    // Choix du nombre de joueurs (1 à 8)
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Nombre de joueurs : $_playerCount '
-                          '(${_playerCount == 1 ? "Solo" : "Toi + ${_playerCount - 1} bot${_playerCount - 1 > 1 ? "s" : ""}"})',
+                          '(${_playerCount == 1 ? "Solo" : "Green Hornet + ${_playerCount - 1} bot${_playerCount - 1 > 1 ? "s" : ""}"})',
                           style: const TextStyle(
                             fontWeight: FontWeight.w800,
                             color: HeatColors.navyHeader,
@@ -409,14 +558,101 @@ class _HomeScreenState extends State<HomeScreen> {
                                     selected ? Colors.white : HeatColors.inkDark,
                                 fontWeight: FontWeight.w900,
                               ),
-                              onSelected: (_) =>
-                                  setState(() => _playerCount = count),
+                              onSelected: (_) {
+                                setState(() {
+                                  _playerCount = count;
+                                  if (_fixedStartPosition > _playerCount) {
+                                    _fixedStartPosition = _playerCount;
+                                  }
+                                });
+                              },
                             );
                           }),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 14),
+
+                    // Position sur la grille : Aléatoire ou Fixe (1..N)
+                    if (_playerCount > 1) ...[
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Position sur la grille de départ :',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: HeatColors.navyHeader,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              ChoiceChip(
+                                avatar: const Icon(Icons.casino, size: 16),
+                                label: const Text('Aléatoire'),
+                                selected: _randomStartPosition,
+                                selectedColor: HeatColors.navyHeader,
+                                labelStyle: TextStyle(
+                                  color: _randomStartPosition
+                                      ? Colors.white
+                                      : HeatColors.inkDark,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                                onSelected: (_) => setState(
+                                  () => _randomStartPosition = true,
+                                ),
+                              ),
+                              ChoiceChip(
+                                avatar: const Icon(Icons.pin_drop, size: 16),
+                                label: Text('Position fixe (P$clampedFixed)'),
+                                selected: !_randomStartPosition,
+                                selectedColor: HeatColors.trackGreen,
+                                labelStyle: TextStyle(
+                                  color: !_randomStartPosition
+                                      ? Colors.white
+                                      : HeatColors.inkDark,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                                onSelected: (_) => setState(
+                                  () => _randomStartPosition = false,
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (!_randomStartPosition) ...[
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: List.generate(_playerCount, (index) {
+                                final pos = index + 1;
+                                final selected = clampedFixed == pos;
+                                return ChoiceChip(
+                                  label: Text('P$pos'),
+                                  selected: selected,
+                                  selectedColor: HeatColors.trackGreen,
+                                  labelStyle: TextStyle(
+                                    color: selected
+                                        ? Colors.white
+                                        : HeatColors.inkDark,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                  onSelected: (_) => setState(
+                                    () => _fixedStartPosition = pos,
+                                  ),
+                                );
+                              }),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+
+                    // Nombre de tours
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -456,6 +692,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                     const SizedBox(height: 12),
+
+                    // Cartes 0/5
                     Material(
                       color: HeatColors.paperCream,
                       shape: RoundedRectangleBorder(
@@ -495,6 +733,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+
                     SizedBox(
                       height: 50,
                       child: ElevatedButton.icon(
@@ -524,40 +763,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _InfoPill extends StatelessWidget {
-  const _InfoPill({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: HeatColors.navyHeader.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: HeatColors.navyHeader.withValues(alpha: 0.25)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: HeatColors.navyHeader),
-          const SizedBox(width: 5),
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: HeatColors.navyHeader,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

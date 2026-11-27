@@ -184,8 +184,8 @@ class PlayerDashboard extends StatelessWidget {
                 InkWell(
                   onTap: () => showDiscardPileDialog(
                     context,
-                    ownerName: 'Toi (Rouge)',
-                    ownerColor: HeatColors.heatRed,
+                    ownerName: HeatGameController.playerDisplayName,
+                    ownerColor: HeatColors.trackGreen,
                     cards: controller.discardPile,
                   ),
                   borderRadius: BorderRadius.circular(8),

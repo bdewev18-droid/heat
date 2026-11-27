@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../models/game_state.dart';
 import '../models/track_data.dart';
+import '../services/race_history_service.dart';
 import '../theme/heat_theme.dart';
 import '../widgets/opponents_panel.dart';
 import '../widgets/player_dashboard.dart';
@@ -19,12 +20,16 @@ class GameScreen extends StatefulWidget {
     super.key,
     this.totalLaps = DeutschlandTrack.defaultLaps,
     this.includeStartingUpgrades = false,
+    this.includeBonusCards = false,
     this.playerCount = 3,
+    this.fixedStartPosition,
   });
 
   final int totalLaps;
   final bool includeStartingUpgrades;
+  final bool includeBonusCards;
   final int playerCount;
+  final int? fixedStartPosition;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -34,6 +39,7 @@ class _GameScreenState extends State<GameScreen> {
   late final HeatGameController _controller;
   bool _showSpaceMarkers = true;
   bool _isTouchingBoard = false;
+  bool _historySavedForCurrentRace = false;
 
   @override
   void initState() {
@@ -41,12 +47,42 @@ class _GameScreenState extends State<GameScreen> {
     _controller = HeatGameController(
       totalLaps: widget.totalLaps,
       includeStartingUpgrades: widget.includeStartingUpgrades,
+      includeBonusCards: widget.includeBonusCards,
       playerCount: widget.playerCount,
+      fixedStartPosition: widget.fixedStartPosition,
     );
+    _controller.addListener(_onControllerChanged);
+  }
+
+  void _onControllerChanged() {
+    if (_controller.step == RoundStep.finished && !_historySavedForCurrentRace) {
+      _historySavedForCurrentRace = true;
+      final now = DateTime.now();
+      RaceHistoryService.addRecord(
+        RaceResultRecord(
+          id: now.microsecondsSinceEpoch.toString(),
+          playedAtIso: now.toIso8601String(),
+          trackName: DeutschlandTrack.name,
+          playerName: HeatGameController.playerDisplayName,
+          playerCount: _controller.playerCount,
+          totalLaps: _controller.totalLaps,
+          startPosition: _controller.startPosition,
+          finalRank: _controller.playerFinishRank ?? 1,
+          roundsCount: _controller.roundNumber,
+          finishLineDistance: _controller.finishLineDistance,
+          includeStartingUpgrades: _controller.includeStartingUpgrades,
+          includeBonusCards: _controller.includeBonusCards,
+        ),
+      );
+    } else if (_controller.step != RoundStep.finished &&
+        _historySavedForCurrentRace) {
+      _historySavedForCurrentRace = false;
+    }
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
   }

@@ -7,9 +7,8 @@ import 'heat_card.dart';
 import 'shadow_bot.dart';
 import 'track_data.dart';
 
-/// Étapes officielles d'un tour (livret p. 4–6) + jet de dés + tour d'un bot.
+/// Étapes officielles d'un tour (livret p. 4–6) + tour d'un bot + arrivée.
 enum RoundStep {
-  diceRoll(0, 'Jet de dés', true),
   shiftGears(1, 'Changer de vitesse', true),
   playCards(2, 'Jouer des cartes', true),
   botTurn(3, 'Tour adverse', true),
@@ -212,31 +211,42 @@ class _GameSnapshot {
 }
 
 /// Moteur complet des règles de base de Heat (circuit Deutschland) :
+/// - Joueur : Green Hornet (Vert), position fixe ou aléatoire choisie avant le départ
 /// - 1 à 8 joueurs (0 à 7 bots réels sans triche)
-/// - Mode Compétition (sans 0/5 par défaut) ou Initiation
-/// - Suivi tour par tour (1er devant commence), Adrénaline (1 dernier ou 2 derniers à 5+ pilotes)
+/// - Mode Compétition (sans 0/5 par défaut) & Cartes Bonus Deckbuild
 /// - Annulation action par action + Recommencer la manche en cours
 class HeatGameController extends ChangeNotifier {
   HeatGameController({
     int totalLaps = DeutschlandTrack.defaultLaps,
     bool includeStartingUpgrades = false,
+    bool includeBonusCards = false,
     int playerCount = 3,
+    int? fixedStartPosition,
     Random? random,
   })  : _totalLaps = totalLaps,
         _includeStartingUpgrades = includeStartingUpgrades,
+        _includeBonusCards = includeBonusCards,
         _playerCount = playerCount.clamp(1, 8),
+        _fixedStartPosition = fixedStartPosition,
         _random = random ?? Random() {
     resetRace(
       totalLaps: totalLaps,
       includeStartingUpgrades: includeStartingUpgrades,
+      includeBonusCards: includeBonusCards,
       playerCount: _playerCount,
+      fixedStartPosition: fixedStartPosition,
     );
   }
+
+  static const String playerDisplayName = 'Green Hornet';
 
   final Random _random;
   int _totalLaps;
   bool _includeStartingUpgrades;
+  bool _includeBonusCards;
   int _playerCount;
+  int? _fixedStartPosition;
+  int _playerStartPosition = 1;
 
   // État piste & voiture du joueur
   int _roundNumber = 1;
@@ -259,7 +269,7 @@ class HeatGameController extends ChangeNotifier {
   int _selectedTargetGear = 1;
 
   // Étape en cours & ordre de passage de la manche
-  RoundStep _step = RoundStep.diceRoll;
+  RoundStep _step = RoundStep.shiftGears;
   List<TurnOrderEntry> _turnOrderQueue = [];
   int _activeTurnIndex = -1;
   bool _playerClutteredThisRound = false;
@@ -318,9 +328,13 @@ class HeatGameController extends ChangeNotifier {
   // Getters publics
   int get totalLaps => _totalLaps;
   bool get includeStartingUpgrades => _includeStartingUpgrades;
+  bool get includeBonusCards => _includeBonusCards;
   int get playerCount => _playerCount;
+  int? get fixedStartPosition => _fixedStartPosition;
+  int get startPosition => _playerStartPosition;
   int get botCount => _bots.length;
   int get finishProgress => _totalLaps * DeutschlandTrack.totalSpaces;
+  int get finishLineDistance => max(0, _carProgress - finishProgress);
   int get roundNumber => _roundNumber;
   int get carProgress => _carProgress;
   int get carLane => _carLane;
@@ -362,14 +376,11 @@ class HeatGameController extends ChangeNotifier {
   List<RaceRecapEntry> get recapEntries => List.unmodifiable(_recapEntries);
 
   bool get canUndo =>
-      _undoStack.isNotEmpty &&
-      _step != RoundStep.diceRoll &&
-      _step != RoundStep.finished;
+      _undoStack.isNotEmpty && _step != RoundStep.finished;
 
   bool get canRestartRound =>
       _roundStartSnapshot != null &&
       _undoStack.isNotEmpty &&
-      _step != RoundStep.diceRoll &&
       _step != RoundStep.finished;
 
   List<RacerTrackState> get opponentStates =>
@@ -396,8 +407,8 @@ class HeatGameController extends ChangeNotifier {
     final list = <RacerTrackState>[
       RacerTrackState(
         id: 'player',
-        name: 'Toi (Rouge)',
-        color: HeatColors.heatRed,
+        name: playerDisplayName,
+        color: HeatColors.trackGreen,
         isHuman: true,
         progress: _carProgress,
         lane: _carLane,
@@ -500,11 +511,18 @@ class HeatGameController extends ChangeNotifier {
   bool get hasRealSlipstreamTarget =>
       _hasSlipstreamTargetFor('player', _carProgress);
 
+  /// Bonus supplémentaire d'aspiration provenant des cartes Bonus jouées ce tour.
+  int get bonusSlipstreamFromCards =>
+      _playArea.fold(0, (sum, c) => sum + c.slipstreamBonus);
+
+  /// Distance totale d'aspiration (+2 de base + bonus éventuel des cartes jouées).
+  int get slipstreamDistance => 2 + bonusSlipstreamFromCards;
+
   bool get canUseSlipstream {
     if (_step != RoundStep.slipstream || _slipstreamUsed) return false;
     if (_pendingStepsToMove > 0) return false;
     if (!hasRealSlipstreamTarget) return false;
-    if (_carProgress + 2 >= finishProgress) return false;
+    if (_carProgress + slipstreamDistance >= finishProgress) return false;
     return true;
   }
 
@@ -664,20 +682,26 @@ class HeatGameController extends ChangeNotifier {
   void resetRace({
     int? totalLaps,
     bool? includeStartingUpgrades,
+    bool? includeBonusCards,
     int? playerCount,
+    int? fixedStartPosition,
   }) {
     _botAnimTimer?.cancel();
     if (totalLaps != null) _totalLaps = totalLaps;
     if (includeStartingUpgrades != null) {
       _includeStartingUpgrades = includeStartingUpgrades;
     }
+    if (includeBonusCards != null) _includeBonusCards = includeBonusCards;
     if (playerCount != null) _playerCount = playerCount.clamp(1, 8);
+    if (fixedStartPosition != null) {
+      _fixedStartPosition = fixedStartPosition.clamp(1, _playerCount);
+    }
 
     _roundNumber = 1;
     _carProgress = 0;
     _carLane = 0;
     _playerDiceRoll = 0;
-    _diceRolled = false;
+    _diceRolled = true;
     _playerFinished = false;
     _playerFinishRank = null;
 
@@ -712,6 +736,7 @@ class HeatGameController extends ChangeNotifier {
 
     _drawPile = createDeutschlandStarterDeck(
       includeStartingUpgrades: _includeStartingUpgrades,
+      includeBonusCards: _includeBonusCards,
     )..shuffle(_random);
     _engineHeat = createDeutschlandEngineHeat();
     _stressReserve = createStressReserve();
@@ -736,78 +761,61 @@ class HeatGameController extends ChangeNotifier {
     );
 
     _drawUpToSeven();
+    _assignStartingGrid();
 
     final modeLabel = _includeStartingUpgrades
-        ? 'Avec cartes 0/5 (+1 Heat)'
-        : 'Mode Compétition (sans 0/5)';
+        ? 'Avec cartes 0/5'
+        : 'Compétition (sans 0/5)';
+    final bonusLabel = _includeBonusCards ? ' • Carte Bonus Blanche' : '';
 
-    if (_bots.isEmpty) {
-      // Mode Solo (1 joueur) : départ direct en Pole Position, Étape 1
-      _diceRolled = true;
-      _step = RoundStep.shiftGears;
-      _log(
-        'Départ Solo sur Deutschland ($_totalLaps tours • $modeLabel) en Pole Position !',
-      );
-      _markRoundStartSnapshot();
-    } else {
-      _step = RoundStep.diceRoll;
-      _log(
-        'Prêt sur Deutschland ($_totalLaps tours • $_playerCount joueurs • $modeLabel) : '
-        'lance les dés pour la grille de départ !',
-      );
-    }
+    _step = RoundStep.shiftGears;
+    _log(
+      'Départ sur Deutschland ($_totalLaps tours • $_playerCount joueurs • '
+      '$modeLabel$bonusLabel) — $playerDisplayName part P$_playerStartPosition !',
+    );
+    _markRoundStartSnapshot();
     notifyListeners();
   }
 
-  // ---------------------------------------------------------------------------
-  // ÉTAPE 0 : Jet de dés (2 à 8 joueurs)
-  // ---------------------------------------------------------------------------
-
-  void rollStartingDice() {
-    if (_step != RoundStep.diceRoll) return;
-
-    // 1..6 pour <= 6 joueurs, 1..10 pour 7–8 joueurs afin d'avoir un ordre sans ex-aequo
-    final maxFace = _playerCount <= 6 ? 6 : 10;
-    final faces = List.generate(maxFace, (i) => i + 1)..shuffle(_random);
-
-    _playerDiceRoll = faces[0];
-    for (var i = 0; i < _bots.length; i++) {
-      _bots[i].diceRoll = faces[i + 1];
+  /// Place tous les pilotes sur la grille (position fixe ou aléatoire décidée avant le départ).
+  void _assignStartingGrid() {
+    final orderedIds = <String>[];
+    if (_bots.isEmpty) {
+      _playerStartPosition = 1;
+      orderedIds.add('player');
+    } else if (_fixedStartPosition != null) {
+      final pos = _fixedStartPosition!.clamp(1, _playerCount);
+      _playerStartPosition = pos;
+      final botIds = _bots.map((b) => b.id).toList()..shuffle(_random);
+      var botIdx = 0;
+      for (var slot = 1; slot <= _playerCount; slot++) {
+        if (slot == pos) {
+          orderedIds.add('player');
+        } else {
+          orderedIds.add(botIds[botIdx++]);
+        }
+      }
+    } else {
+      final allIds = <String>['player', ..._bots.map((b) => b.id)]
+        ..shuffle(_random);
+      orderedIds.addAll(allIds);
+      _playerStartPosition = orderedIds.indexOf('player') + 1;
     }
-    _diceRolled = true;
 
-    final entries = <({String id, String name, int roll})>[
-      (id: 'player', name: 'Toi (Rouge)', roll: _playerDiceRoll),
-      for (final b in _bots) (id: b.id, name: b.name, roll: b.diceRoll),
-    ]..sort((a, b) => b.roll.compareTo(a.roll));
-
-    // Grille : P1=(0,0), P2=(0,1), P3=(-1,0), P4=(-1,1), ..., P7=(-3,0), P8=(-3,1)
-    for (var i = 0; i < entries.length; i++) {
+    for (var i = 0; i < orderedIds.length; i++) {
       final gridProgress = -(i ~/ 2);
       final gridLane = i % 2;
-      if (entries[i].id == 'player') {
+      if (orderedIds[i] == 'player') {
         _carProgress = gridProgress;
         _carLane = gridLane;
         _roundStartProgress = _carProgress;
         _moveFloorProgress = _carProgress;
       } else {
-        final bot = _bots.firstWhere((b) => b.id == entries[i].id);
+        final bot = _bots.firstWhere((b) => b.id == orderedIds[i]);
         bot.progress = gridProgress;
         bot.lane = gridLane;
       }
     }
-
-    _log(
-      'Jet de dés : ${entries.asMap().entries.map((e) => "P${e.key + 1} ${e.value.name} (${e.value.roll})").join(' • ')}.',
-    );
-    notifyListeners();
-  }
-
-  void startRaceAfterDiceRoll() {
-    if (_step != RoundStep.diceRoll || !_diceRolled) return;
-    _step = RoundStep.shiftGears;
-    _markRoundStartSnapshot();
-    notifyListeners();
   }
 
   // ---------------------------------------------------------------------------
@@ -859,6 +867,14 @@ class HeatGameController extends ChangeNotifier {
     if (_step == RoundStep.playCards) {
       if (_selectedCardIds.contains(card.id)) return true;
       if (_selectedCardIds.length >= _gear) return false;
+      if (card.heatCost > 0) {
+        final alreadySelectedHeatCost = _hand
+            .where((c) => _selectedCardIds.contains(c.id))
+            .fold<int>(0, (sum, c) => sum + c.heatCost);
+        if (_engineHeat.length < alreadySelectedHeatCost + card.heatCost) {
+          return false;
+        }
+      }
       if (card.canPlayNormally) return true;
       if (isClutteredHand) {
         final selectedPlayable = _hand
@@ -933,6 +949,12 @@ class HeatGameController extends ChangeNotifier {
     _playArea.addAll(chosen);
     _selectedCardIds.clear();
     _playerClutteredThisRound = chosen.any((c) => c.isHeat);
+
+    // Coût en Heat des cartes Bonus jouées (ex: Carte Blanche -1 Heat)
+    final cardHeatCost = chosen.fold<int>(0, (sum, c) => sum + c.heatCost);
+    if (cardHeatCost > 0) {
+      _payHeat(cardHeatCost, reason: 'Carte Bonus Blanche');
+    }
 
     // 3. Figer l'ordre de résolution : TOUJOURS le pilote devant qui commence !
     final activeOrder = standings.where((r) => !r.finished).toList();
@@ -1339,9 +1361,17 @@ class HeatGameController extends ChangeNotifier {
     _pushUndoSnapshot();
     _slipstreamUsed = true;
     _moveFloorProgress = _carProgress;
-    _pendingStepsToMove += 2;
-    _playerRoundDetails.add('⏩ Aspiration (+2 cases)');
-    _log('Étape 6 (Aspiration) : +2 cases (ne compte pas pour les virages).');
+    final dist = slipstreamDistance;
+    final bonus = bonusSlipstreamFromCards;
+    _pendingStepsToMove += dist;
+    _playerRoundDetails.add(
+      bonus > 0
+          ? '⏩ Aspiration (+$dist cases : +2 & +$bonus Bonus)'
+          : '⏩ Aspiration (+$dist cases)',
+    );
+    _log(
+      'Étape 6 (Aspiration) : +$dist cases (ne compte pas pour les virages).',
+    );
     notifyListeners();
   }
 
@@ -1492,8 +1522,8 @@ class HeatGameController extends ChangeNotifier {
       RaceRecapEntry(
         roundNumber: _roundNumber,
         racerId: 'player',
-        racerName: 'Toi (Rouge)',
-        racerColor: HeatColors.heatRed,
+        racerName: playerDisplayName,
+        racerColor: HeatColors.trackGreen,
         isHuman: true,
         previousGear: _roundStartGear,
         finalGear: _gear,

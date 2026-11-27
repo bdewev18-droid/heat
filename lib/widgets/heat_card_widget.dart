@@ -71,11 +71,151 @@ class HeatCardWidget extends StatelessWidget {
         return _buildSpeedOverlay(isBasic: true);
       case HeatCardType.upgradeSpeed:
         return _buildSpeedOverlay(isBasic: false);
+      case HeatCardType.bonus:
+        return _buildBonusOverlay();
       case HeatCardType.stress:
         return _buildStressOverlay();
       case HeatCardType.heat:
         return _buildHeatOverlay();
     }
+  }
+
+  Widget _buildBonusOverlay() {
+    final value = '${card.speedValue ?? 1}';
+    final mini = width <= 54;
+    final compact = width < 64;
+
+    if (mini) {
+      return Stack(
+        children: [
+          Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.black, width: 1.6),
+              ),
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: (width * 0.48).clamp(16.0, 24.0),
+                  fontWeight: FontWeight.w900,
+                  color: Colors.black,
+                  height: 1.05,
+                ),
+              ),
+            ),
+          ),
+          if (card.slipstreamBonus > 0)
+            Positioned(
+              bottom: 2,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Text(
+                  '+${card.slipstreamBonus} ASP',
+                  style: const TextStyle(
+                    fontSize: 7,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    return Stack(
+      children: [
+        // Chiffre noir en haut à gauche et en haut à droite sur fond blanc
+        Positioned(
+          top: 3,
+          left: 4,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.black, width: 1.3),
+            ),
+            child: Text(
+              value,
+              style: TextStyle(
+                color: Colors.black,
+                fontSize: compact ? 13 : 16,
+                fontWeight: FontWeight.w900,
+                height: 1.05,
+              ),
+            ),
+          ),
+        ),
+        if (card.heatCost > 0)
+          Positioned(
+            top: 3,
+            right: 4,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: HeatColors.heatRed,
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                '-${card.heatCost}🔥',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: compact ? 8 : 9,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+        if (card.slipstreamBonus > 0)
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: HeatColors.trackGreen,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white, width: 1),
+              ),
+              child: Text(
+                '⏩ +${card.slipstreamBonus}',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: compact ? 9 : 10.5,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ),
+        Positioned(
+          bottom: 3,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.black,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'BONUS',
+                style: TextStyle(
+                  fontSize: compact ? 6.5 : 7.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.7,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildSpeedOverlay({required bool isBasic}) {
@@ -488,6 +628,8 @@ class _HeatCardArtPainter extends CustomPainter {
       _paintHeatBackground(canvas, w, h);
     } else if (card.isStress) {
       _paintStressBackground(canvas, w, h);
+    } else if (card.isBonus) {
+      _paintWhiteBonusBackground(canvas, w, h);
     } else {
       _paintSpeedBackground(canvas, w, h, card.speedValue ?? 1);
     }
@@ -496,6 +638,41 @@ class _HeatCardArtPainter extends CustomPainter {
     if (card.isStartingUpgrade) {
       _paintUpgradeChevrons(canvas, w, h);
     }
+  }
+
+  void _paintWhiteBonusBackground(Canvas canvas, double w, double h) {
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, w, h),
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Color(0xFFFFFFFF),
+            Color(0xFFF2F4F7),
+            Color(0xFFE4E8EE),
+          ],
+        ).createShader(Rect.fromLTWH(0, 0, w, h)),
+    );
+
+    // Double bande racing grise / noire discrète
+    canvas.drawRect(
+      Rect.fromLTWH(w * 0.41, 0, w * 0.06, h),
+      Paint()..color = const Color(0xFFD0D5DD),
+    );
+    canvas.drawRect(
+      Rect.fromLTWH(w * 0.53, 0, w * 0.06, h),
+      Paint()..color = const Color(0xFFD0D5DD),
+    );
+
+    // Cadre noir fin
+    canvas.drawRect(
+      Rect.fromLTWH(0.5, 0.5, w - 1, h - 1),
+      Paint()
+        ..color = Colors.black87
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
   }
 
   void _paintSpeedBackground(Canvas canvas, double w, double h, int value) {

@@ -195,7 +195,7 @@ List<ShadowBot> createOpponentBots({
 }) {
   const profiles = <({String id, String name, Color color, double aggr})>[
     (id: 'bot_blue', name: 'Pilote Bleu', color: Color(0xFF1565C0), aggr: 0.65),
-    (id: 'bot_green', name: 'Pilote Vert', color: Color(0xFF2E7D32), aggr: 0.40),
+    (id: 'bot_red', name: 'Pilote Rouge', color: Color(0xFFD8231D), aggr: 0.40),
     (id: 'bot_yellow', name: 'Pilote Jaune', color: Color(0xFFC79100), aggr: 0.55),
     (id: 'bot_purple', name: 'Pilote Violet', color: Color(0xFF7B1FA2), aggr: 0.72),
     (id: 'bot_black', name: 'Pilote Noir', color: Color(0xFF37474F), aggr: 0.35),
